@@ -20,6 +20,14 @@ namespace Интерпретатор_машины_Тьюринга
         private bool  isTaskReadOnlyMode    = false;
         private Form  studentTasksMenuRef   = null;
 
+        // Версия конфигурации задания (Assignment.ConfigVersion), на которую студент
+        // в данный момент опирается в окне выполнения. Передаётся серверу при /draft,
+        // чтобы тот понял: сохранение основано на актуальной МТ — флаг IsOutdated и
+        // привязку AssignmentConfigVersion можно безопасно сбросить. Значение
+        // null означает «студент продолжает работу над устаревшим решением» — сервер
+        // не трогает флаг устаревания.
+        private int?  activeAssignmentBaseVersion = null;
+
         private TuringMachineData mainInterpreterBackup = null;
 
         private Button btnDraftTop;
@@ -271,13 +279,23 @@ namespace Интерпретатор_машины_Тьюринга
                 btnRevokeTop.Text = "Отозвать работу"; btnRevokeTop.Enabled = true;
             };
 
-            btnResetSolutionTop.Click += (s, e) =>
+            btnResetSolutionTop.Click += async (s, e) =>
             {
                 if (string.IsNullOrEmpty(originalAssignmentDescription)) { ShowWarningDialog("Не удалось получить исходную конфигурацию задания от преподавателя."); return; }
                 if (!ShowConfirmDialog("Сбросить решение к исходной конфигурации задания?\n\nВсе ваши текущие изменения МТ и комментарий будут потеряны.", "Сброс решения")) return;
+
+                // Перед сбросом обязательно подтягиваем актуальное состояние задания.
+                // Если преподаватель только что снова поменял МТ — мы должны сбросить
+                // именно к новой исходной конфигурации, а не к той, с которой студент
+                // открывал задание.
+                if (!await EnsureExecutionStillAvailable()) return;
+                var fresh = await ApiClient.GetAssignmentStateAsync(activeAssignmentId.Value);
+                if (fresh == null || fresh.IsDeleted) { ShowWarningDialog("Не удалось получить актуальную конфигурацию задания."); return; }
+                string sourceJson = !string.IsNullOrEmpty(fresh.Description) ? fresh.Description : originalAssignmentDescription;
+
                 try
                 {
-                    var data = JsonConvert.DeserializeObject<TuringMachineData>(originalAssignmentDescription);
+                    var data = JsonConvert.DeserializeObject<TuringMachineData>(sourceJson);
                     if (data != null)
                     {
                         alphabetTextBox.Text = data.Alphabet ?? "01";
@@ -293,6 +311,10 @@ namespace Интерпретатор_машины_Тьюринга
                         var problemTextBox = UslovieZadachi.Controls.OfType<TextBox>().FirstOrDefault();
                         if (problemTextBox != null) problemTextBox.Text = data.ProblemCondition ?? "";
                         if (commentTextBox != null) commentTextBox.Text = "";
+                        // Сброс к исходной → решение основано на актуальной МТ.
+                        // При следующем /draft сервер снимет флаг IsOutdated.
+                        originalAssignmentDescription = sourceJson;
+                        activeAssignmentBaseVersion = fresh.ConfigVersion;
                         isTaskExecutionDirty = true;
                         ShowSuccessDialog("Решение сброшено к исходной конфигурации преподавателя. Не забудьте сохранить.");
                     }
@@ -306,10 +328,10 @@ namespace Интерпретатор_машины_Тьюринга
                 if (!await EnsureExecutionStillAvailable()) return;
                 var pTextBox = UslovieZadachi.Controls.OfType<TextBox>().FirstOrDefault();
                 var currentData = new TuringMachineData { Alphabet = alphabetTextBox.Text, TapeContent = tapeControl.tapeRenderer._tape.ToDictionary(k => k.Key, v => v.Value.Value), HeadPosition = tapeControl.tapeRenderer.GetHeadPosition(), States = states.ToList(), TransitionRules = SaveTableData(), ProblemCondition = pTextBox?.Text ?? "", Comment = commentTextBox.Text };
-                btnDraftTop.Text = "Сохранение..."; btnDraftTop.Enabled = false;
-                bool success = await ApiClient.SaveDraftAsync(activeAssignmentId.Value, JsonConvert.SerializeObject(currentData));
+                btnDraftTop.Enabled = false;
+                bool success = await ApiClient.SaveDraftAsync(activeAssignmentId.Value, JsonConvert.SerializeObject(currentData), activeAssignmentBaseVersion);
                 if (success) { isTaskExecutionDirty = false; DataRefreshBus.Raise("Submission", "Updated", activeAssignmentId.Value); ShowSuccessDialog("Решение сохранено и считается загруженным. Вы можете продолжить редактирование — пока не истёк срок сдачи или преподаватель не начал проверку."); }
-                btnDraftTop.Text = "Сохранить и продолжить"; btnDraftTop.Enabled = btnDraftTop.Visible;
+                btnDraftTop.Enabled = btnDraftTop.Visible;
             };
 
             btnSubmitTop.Click += async (s, e) =>
@@ -319,9 +341,9 @@ namespace Интерпретатор_машины_Тьюринга
                 if (!ShowConfirmDialog("Сохранить решение и закрыть окно?\n\nРешение будет считаться загруженным (статус «Не оценено»). Вы сможете отозвать его и внести правки, пока не истёк срок сдачи и преподаватель не начал проверку.", "Сохранение решения")) return;
                 var pTextBox = UslovieZadachi.Controls.OfType<TextBox>().FirstOrDefault();
                 var currentData = new TuringMachineData { Alphabet = alphabetTextBox.Text, TapeContent = tapeControl.tapeRenderer._tape.ToDictionary(k => k.Key, v => v.Value.Value), HeadPosition = tapeControl.tapeRenderer.GetHeadPosition(), States = states.ToList(), TransitionRules = SaveTableData(), Comment = commentTextBox.Text, ProblemCondition = pTextBox?.Text ?? "" };
-                btnSubmitTop.Text = "Сохранение..."; btnSubmitTop.Enabled = false;
-                bool draftOk = await ApiClient.SaveDraftAsync(activeAssignmentId.Value, JsonConvert.SerializeObject(currentData));
-                if (!draftOk) { btnSubmitTop.Text = "Сохранить решение"; btnSubmitTop.Enabled = true; return; }
+                btnSubmitTop.Enabled = false;
+                bool draftOk = await ApiClient.SaveDraftAsync(activeAssignmentId.Value, JsonConvert.SerializeObject(currentData), activeAssignmentBaseVersion);
+                if (!draftOk) { btnSubmitTop.Enabled = true; return; }
                 await ApiClient.SubmitAssignmentAsync(activeAssignmentId.Value);
                 DataRefreshBus.Raise("Submission", "Updated", activeAssignmentId.Value);
                 ShowSuccessDialog("Решение успешно сохранено и загружено!");
@@ -346,7 +368,7 @@ namespace Интерпретатор_машины_Тьюринга
         // ──────────────────────────────────────────────────────────
         // Вход / выход из режима выполнения задания
         // ──────────────────────────────────────────────────────────
-        private void EnterTaskExecutionMode(int assignmentId, string taskName, string jsonToLoad, bool isReadOnlyMode, bool canRevoke, Form menuRef, bool isOutdated = false)
+        private void EnterTaskExecutionMode(int assignmentId, string taskName, string jsonToLoad, bool isReadOnlyMode, bool canRevoke, Form menuRef, bool isOutdated = false, int currentConfigVersion = 1)
         {
             BackupMainInterpreterState();
             SetupTaskExecutionButtons();
@@ -354,14 +376,20 @@ namespace Интерпретатор_машины_Тьюринга
             activeAssignmentId  = assignmentId;
             isTaskReadOnlyMode  = isReadOnlyMode;
 
+            // Если студент открыл задание не на устаревшей версии (нет submission
+            // или сохранение уже основано на актуальной МТ) — фиксируем текущую
+            // ConfigVersion как «базу» сессии. Все будущие /draft из этого окна
+            // будут уведомлять сервер, что сохранение основано на актуальной МТ
+            // (флаг IsOutdated при сохранении сбросится).
+            //
+            // Если же решение устарело (учитель менял МТ, студент ещё не сбрасывал
+            // решение) — оставляем null: сервер сохранит решение как есть,
+            // не трогая флаг устаревания. Флаг будет снят только после нажатия
+            // студентом «Сбросить решение» (см. btnResetSolutionTop.Click).
+            activeAssignmentBaseVersion = isOutdated ? (int?)null : currentConfigVersion;
+
             if (btnUserMenu != null) btnUserMenu.Visible = false;
             if (btnExecution != null) btnExecution.Enabled = true;
-
-            // Параметр isOutdated сохранён в сигнатуре для обратной совместимости с внешними вызовами,
-            // однако в окне выполнения задания никакие индикаторы об устаревании МТ больше не показываются
-            // (см. требование UX: окна с актуальной и обновлённой МТ должны различаться только в окне
-            // «Информация о задании» — наличием информационной надписи, без дополнительных кнопок).
-            _ = isOutdated;
 
             btnReturnTop.Visible            = true;
             btnDraftTop.Visible             = !isReadOnlyMode;
@@ -425,6 +453,7 @@ namespace Интерпретатор_машины_Тьюринга
         private void ExitTaskExecutionMode()
         {
             activeAssignmentId = null;
+            activeAssignmentBaseVersion = null;
             originalAssignmentDescription = null;
             originalStudentSolution = null;
 

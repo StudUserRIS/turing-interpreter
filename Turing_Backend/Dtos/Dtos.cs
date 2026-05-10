@@ -91,6 +91,15 @@ public class SubmitSubmissionDto
 {
     public int AssignmentId { get; set; }
     public string SolutionJson { get; set; } = "";
+
+    // Версия конфигурации задания (Assignment.ConfigVersion), на основе которой
+    // подготовлено сохраняемое решение. Заполняется клиентом, когда он уверен,
+    // что работает с актуальной МТ (только что открыл задание с актуальной МТ
+    // или сбросил решение к исходной конфигурации преподавателя). Если значение
+    // совпадает с текущей ConfigVersion задания — сервер снимает флаг IsOutdated
+    // и обновляет AssignmentConfigVersion. Если значение не передано (null) или
+    // не совпадает — флаг и привязка к версии остаются прежними.
+    public int? BasedOnConfigVersion { get; set; }
 }
 
 public class ChangePasswordDto

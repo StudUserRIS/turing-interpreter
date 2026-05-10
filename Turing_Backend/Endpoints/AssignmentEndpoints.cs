@@ -283,7 +283,7 @@ public static class AssignmentEndpoints
         {
             using var db = dbFactory.Create();
             var assignment = await db.QueryFirstOrDefaultAsync<dynamic>(@"
-                SELECT a.Id, a.Title, a.Type, a.Deadline, a.Status, a.Description, a.Version, a.CourseId,
+                SELECT a.Id, a.Title, a.Type, a.Deadline, a.Status, a.Description, a.Version, a.ConfigVersion, a.CourseId,
                        c.Name as CourseName, c.Archived as CourseArchived
                 FROM Assignments a
                 JOIN Courses c ON a.CourseId = c.Id
@@ -299,6 +299,7 @@ public static class AssignmentEndpoints
                 Status = (string)assignment.status,
                 Description = (string?)assignment.description,
                 Version = (int)assignment.version,
+                ConfigVersion = (int)assignment.configversion,
                 CourseId = (int)assignment.courseid,
                 CourseName = (string)assignment.coursename,
                 CourseArchived = (int)assignment.coursearchived,
@@ -384,10 +385,22 @@ public static class AssignmentEndpoints
                     if (raced.Status == "Оценено" || raced.IsBeingChecked == 1)
                         return Common.ApiResults.Conflict("SubmissionLocked",
                             $"Работа по заданию «{assignment.Title}» уже находится в проверке или оценена. Изменение невозможно.");
-                    await db.ExecuteAsync(
-                        "UPDATE Submissions SET SolutionJson = @json, SubmittedAt = @now, Status = 'Не оценено', " +
-                        "IsOutdated = 0, AssignmentConfigVersion = @cv, Version = Version + 1, UpdatedAt = NOW() WHERE Id = @subId",
-                        new { json = dto.SolutionJson, now = DateTime.Now, cv = assignment.ConfigVersion, subId = raced.Id });
+                    bool racedBasedOnCurrent = dto.BasedOnConfigVersion.HasValue
+                                            && dto.BasedOnConfigVersion.Value == assignment.ConfigVersion;
+                    if (racedBasedOnCurrent)
+                    {
+                        await db.ExecuteAsync(
+                            "UPDATE Submissions SET SolutionJson = @json, SubmittedAt = @now, Status = 'Не оценено', " +
+                            "IsOutdated = 0, AssignmentConfigVersion = @cv, Version = Version + 1, UpdatedAt = NOW() WHERE Id = @subId",
+                            new { json = dto.SolutionJson, now = DateTime.Now, cv = assignment.ConfigVersion, subId = raced.Id });
+                    }
+                    else
+                    {
+                        await db.ExecuteAsync(
+                            "UPDATE Submissions SET SolutionJson = @json, SubmittedAt = @now, Status = 'Не оценено', " +
+                            "Version = Version + 1, UpdatedAt = NOW() WHERE Id = @subId",
+                            new { json = dto.SolutionJson, now = DateTime.Now, subId = raced.Id });
+                    }
                     submissionId = raced.Id;
                 }
             }
@@ -406,11 +419,31 @@ public static class AssignmentEndpoints
 
                 // Статус "Не сдано" или "Не оценено" — разрешаем редактирование.
                 // При сохранении переводим в "Не оценено" (решение загружено).
-                // IsOutdated сбрасываем: студент сохранил решение под актуальной МТ.
-                await db.ExecuteAsync(
-                    "UPDATE Submissions SET SolutionJson = @json, SubmittedAt = @now, Status = 'Не оценено', " +
-                    "IsOutdated = 0, AssignmentConfigVersion = @cv, Version = Version + 1, UpdatedAt = NOW() WHERE Id = @subId",
-                    new { json = dto.SolutionJson, now = DateTime.Now, cv = assignment.ConfigVersion, subId = existing.Id });
+                //
+                // Подпись «Начальная МТ у задания была изменена» в окне информации
+                // должна "залипать", пока студент продолжает редактировать своё
+                // старое решение. НО если он сбросил решение к исходной (актуальной)
+                // конфигурации преподавателя и сохраняет — флаг должен сняться.
+                // Клиент сообщает об этом через BasedOnConfigVersion: значение
+                // равно текущей Assignment.ConfigVersion ⇒ сохранение основано на
+                // актуальной МТ ⇒ снимаем IsOutdated и обновляем AssignmentConfigVersion.
+                // Если поле не задано или не совпадает — оставляем как было.
+                bool basedOnCurrent = dto.BasedOnConfigVersion.HasValue
+                                   && dto.BasedOnConfigVersion.Value == assignment.ConfigVersion;
+                if (basedOnCurrent)
+                {
+                    await db.ExecuteAsync(
+                        "UPDATE Submissions SET SolutionJson = @json, SubmittedAt = @now, Status = 'Не оценено', " +
+                        "IsOutdated = 0, AssignmentConfigVersion = @cv, Version = Version + 1, UpdatedAt = NOW() WHERE Id = @subId",
+                        new { json = dto.SolutionJson, now = DateTime.Now, cv = assignment.ConfigVersion, subId = existing.Id });
+                }
+                else
+                {
+                    await db.ExecuteAsync(
+                        "UPDATE Submissions SET SolutionJson = @json, SubmittedAt = @now, Status = 'Не оценено', " +
+                        "Version = Version + 1, UpdatedAt = NOW() WHERE Id = @subId",
+                        new { json = dto.SolutionJson, now = DateTime.Now, subId = existing.Id });
+                }
                 submissionId = existing.Id;
             }
 

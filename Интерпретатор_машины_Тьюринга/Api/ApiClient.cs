@@ -1297,10 +1297,12 @@ namespace Интерпретатор_машины_Тьюринга
             return null;
         }
 
-        public static async Task<bool> SaveDraftAsync(int assignmentId, string solutionJson)
+        public static async Task<bool> SaveDraftAsync(int assignmentId, string solutionJson, int? basedOnConfigVersion = null)
         {
             EnsureBaseUrl();
-            var payload = new { SolutionJson = solutionJson };
+            object payload = basedOnConfigVersion.HasValue
+                ? (object)new { SolutionJson = solutionJson, BasedOnConfigVersion = basedOnConfigVersion.Value }
+                : new { SolutionJson = solutionJson };
             var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
             var response = await SendWithSessionAsync(new HttpRequestMessage(HttpMethod.Post, BaseUrl + $"assignments/{assignmentId}/draft") { Content = content });
             if (response.IsSuccessStatusCode) return true;

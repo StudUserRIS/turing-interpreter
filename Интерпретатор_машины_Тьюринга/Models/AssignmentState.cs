@@ -14,6 +14,7 @@ namespace Интерпретатор_машины_Тьюринга
         public string Status { get; set; }
         public string Description { get; set; }
         public int Version { get; set; }
+        public int ConfigVersion { get; set; } = 1;
         public int CourseId { get; set; }
         public string CourseName { get; set; }
         public int CourseArchived { get; set; }

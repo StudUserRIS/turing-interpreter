@@ -376,6 +376,10 @@ namespace Интерпретатор_машины_Тьюринга
         // ИСПРАВЛЕНИЕ: Изменен тип параметра deadlineStr на DateTime deadline
         private async void ShowAssignmentWindow(int assignmentId, string courseName, string taskName, string taskType, DateTime deadline, string status, string grade, string description, Form parentForm = null)
         {
+            // Актуальная версия конфигурации задания. Используется при входе в окно
+            // выполнения, чтобы сообщить серверу версию, на которую опирается студент,
+            // и при сохранении корректно сбрасывать/сохранять флаг IsOutdated.
+            int currentConfigVersion = 1;
             if (assignmentId > 0)
             {
                 var freshState = await ApiClient.GetAssignmentStateAsync(assignmentId);
@@ -400,6 +404,7 @@ namespace Интерпретатор_машины_Тьюринга
                 deadline = freshState.Deadline;
                 status = freshState.Status ?? status;
                 description = freshState.Description ?? description;
+                currentConfigVersion = freshState.ConfigVersion;
             }
 
             Submission mySubmission = null;
@@ -483,9 +488,12 @@ namespace Интерпретатор_машины_Тьюринга
             bool isOutdated = (mySubmission?.IsOutdated ?? 0) == 1;
 
             // Логика кнопок:
-            //   • Если работа в "Оценено" — кнопка "Просмотр решения" (read-only).
-            //   • Если работа в "Не оценено" и дедлайн не вышел и не на проверке — кнопка "Отозвать работу".
-            //   • Если работа в "Не сдано" или статуса нет, и дедлайн не вышел — кнопка "Приступить".
+            //   • Если работа в "Оценено" — кнопка "Просмотр решения" (read-only, во всю ширину).
+            //   • Если работа в "Не оценено" (отправлена на проверку) — кнопка "Просмотр решения"
+            //     (отозвать работу можно из окна выполнения).
+            //   • Если есть сохранённый черновик и дедлайн не вышел —
+            //     "Начать с начала" + "Продолжить работу".
+            //   • Если работы ещё нет — одна кнопка "Приступить" во всю ширину.
             //   • Если дедлайн истёк — только просмотр (если что-то загружено).
             //
             // ВАЖНО (UX): набор кнопок при наличии и отсутствии изменений МТ ОДИНАКОВЫЙ.
@@ -528,22 +536,53 @@ namespace Интерпретатор_машины_Тьюринга
 
             currentY += 15;
 
-            int btnWidth = 185, btnHeight = 30;
+            // У студента есть сохранённая работа (черновик или загруженное решение),
+            // если в submission непустой SolutionJson. На основе этого решаем, нужна
+            // ли в окне отдельная кнопка «Начать с начала» или достаточно одной
+            // кнопки «Приступить» во всю ширину.
+            bool hasSavedWork = mySubmission != null && !string.IsNullOrEmpty(mySubmission.SolutionJson);
+
+            int btnHeight = 30;
             int btnLeftX = 20;
+            int fullBtnWidth = formClientWidth - btnLeftX * 2;
+            int halfBtnWidth = 185;
             int btnRightX = 215;
 
-            Button btnAction = new Button { Size = new Size(btnWidth, btnHeight), FlatStyle = FlatStyle.Standard, Font = fontRegular, Location = new Point(btnLeftX, currentY) };
-            Button btnStart = new Button { Size = new Size(btnWidth, btnHeight), FlatStyle = FlatStyle.Standard, Font = fontRegular, Location = new Point(btnRightX, currentY) };
+            // Кнопка «Начать с начала» показывается только когда у студента есть
+            // сохранённая работа и он ещё может её редактировать (не оценено,
+            // не на проверке, дедлайн не истёк).
+            bool showRestartButton = hasSavedWork && !isReadOnly;
 
-            if (canRevoke)
+            Button btnRestart = null;
+            Button btnStart;
+
+            if (showRestartButton)
             {
-                btnAction.Text = "Отозвать работу";
-                btnAction.Enabled = true;
+                btnRestart = new Button
+                {
+                    Text = "Начать с начала",
+                    Size = new Size(halfBtnWidth, btnHeight),
+                    FlatStyle = FlatStyle.Standard,
+                    Font = fontRegular,
+                    Location = new Point(btnLeftX, currentY)
+                };
+                btnStart = new Button
+                {
+                    Size = new Size(halfBtnWidth, btnHeight),
+                    FlatStyle = FlatStyle.Standard,
+                    Font = fontRegular,
+                    Location = new Point(btnRightX, currentY)
+                };
             }
             else
             {
-                btnAction.Text = "Отозвать работу";
-                btnAction.Enabled = false;
+                btnStart = new Button
+                {
+                    Size = new Size(fullBtnWidth, btnHeight),
+                    FlatStyle = FlatStyle.Standard,
+                    Font = fontRegular,
+                    Location = new Point(btnLeftX, currentY)
+                };
             }
 
             if (isReadOnly)
@@ -552,7 +591,7 @@ namespace Интерпретатор_машины_Тьюринга
             }
             else
             {
-                btnStart.Text = hasSubmission ? "Продолжить работу" : "Приступить";
+                btnStart.Text = hasSavedWork ? "Продолжить работу" : "Приступить";
             }
 
             async Task<bool> EnsureAssignmentStillAvailable(string actionVerb)
@@ -580,24 +619,34 @@ namespace Интерпретатор_машины_Тьюринга
                 return true;
             }
 
-            btnAction.Click += async (s, e) =>
+            if (btnRestart != null)
             {
-                if (canRevoke)
+                btnRestart.Click += async (s, e) =>
                 {
-                    if (!await EnsureAssignmentStillAvailable("отозвать работу")) return;
+                    if (!await EnsureAssignmentStillAvailable("начать задание с начала")) return;
                     if (!ShowConfirmDialog(
-                        "Отозвать работу с проверки?\n\n" +
-                        "Решение будет переведено в статус «Не сдано». Вы сможете внести правки и снова сохранить решение, пока не истёк срок сдачи.",
-                        "Отозвать работу")) return;
-                    btnAction.Enabled = false;
-                    if (await ApiClient.RevokeSubmissionAsync(assignmentId))
+                        "Начать задание с начала?\n\n" +
+                        "Ваше сохранённое решение будет удалено, а машина Тьюринга вернётся к исходной конфигурации преподавателя. Это действие нельзя отменить.",
+                        "Начать с начала")) return;
+                    btnRestart.Enabled = false;
+                    if (await ApiClient.ResetSubmissionAsync(assignmentId))
                     {
                         DataRefreshBus.Raise("Submission", "Updated", assignmentId);
-                        ShowSuccessDialog("Работа успешно отозвана. Теперь вы можете отредактировать решение.");
+                        originalAssignmentDescription = description;
+                        originalStudentSolution = null;
                         taskDetailForm.Close();
+                        // После /reset запись submission удалена. Студент входит в окно
+                        // с актуальной МТ и без сохранения — isOutdated=false, базовая
+                        // версия = текущая. При первом /draft создастся новый submission
+                        // с IsOutdated=0 и AssignmentConfigVersion = currentConfigVersion.
+                        EnterTaskExecutionMode(assignmentId, taskName, description, false, false, parentForm, false, currentConfigVersion);
                     }
-                }
-            };
+                    else
+                    {
+                        btnRestart.Enabled = true;
+                    }
+                };
+            }
 
             btnStart.Click += async (s, e) =>
             {
@@ -605,12 +654,15 @@ namespace Интерпретатор_машины_Тьюринга
                 originalAssignmentDescription = description;
                 originalStudentSolution = mySubmission?.SolutionJson;
 
-                string jsonToLoad = (mySubmission != null && !string.IsNullOrEmpty(mySubmission.SolutionJson)) ? mySubmission.SolutionJson : description;
+                string jsonToLoad = hasSavedWork ? mySubmission.SolutionJson : description;
                 taskDetailForm.Close();
-                EnterTaskExecutionMode(assignmentId, taskName, jsonToLoad, isReadOnly, canRevoke, parentForm, isOutdated);
+                EnterTaskExecutionMode(assignmentId, taskName, jsonToLoad, isReadOnly, canRevoke, parentForm, isOutdated, currentConfigVersion);
             };
 
-            taskDetailForm.Controls.AddRange(new Control[] { btnAction, btnStart });
+            if (btnRestart != null)
+                taskDetailForm.Controls.AddRange(new Control[] { btnRestart, btnStart });
+            else
+                taskDetailForm.Controls.Add(btnStart);
             taskDetailForm.ClientSize = new Size(formClientWidth, currentY + 45);
 
             bool autoRefreshing = false;
