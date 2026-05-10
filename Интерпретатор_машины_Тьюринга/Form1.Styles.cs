@@ -58,6 +58,17 @@ namespace Интерпретатор_машины_Тьюринга
 
         // ──────────────────────────────────────────────────────────
         // Единый стиль таблиц DataGridView
+        //
+        // Синяя рамка-индикатор выбранной ячейки/строки рисуется ТОЛЬКО когда
+        // в таблице действительно есть пользовательский выбор
+        // (SelectedRows / SelectedCells), а НЕ просто когда WinForms сам
+        // выставил CurrentCell на (0,0) после Rows.Add.
+        //
+        // Это закрывает требование: при открытии окна ни одна ячейка не
+        // должна быть выделена синей рамкой автоматически. То же относится
+        // к перестройке таблицы поиском/фильтром: если фильтр снимает выбор
+        // визуально (через ClearSelection), то синяя рамка тоже должна
+        // исчезнуть, даже если CurrentCell ещё не успел стать null.
         // ──────────────────────────────────────────────────────────
         private void ApplyModernTableStyle(DataGridView dgv)
         {
@@ -74,9 +85,52 @@ namespace Интерпретатор_машины_Тьюринга
                     & ~DataGridViewPaintParts.Border
                     & ~DataGridViewPaintParts.SelectionBackground);
 
-                if (dgv.CurrentCell != null
-                    && dgv.CurrentCell.RowIndex == e.RowIndex
-                    && dgv.CurrentCell.ColumnIndex == e.ColumnIndex)
+                // Рисуем синюю рамку только если ячейка/строка реально выбрана
+                // пользователем (SelectedRows/SelectedCells непусты).
+                // CurrentCell сам по себе НЕ является признаком выбора —
+                // WinForms автоматически выставляет его в (0,0) после
+                // Rows.Add, и это не должно приводить к появлению
+                // синей рамки.
+                bool hasSelection = false;
+                try
+                {
+                    if (dgv.CurrentCell != null
+                        && dgv.CurrentCell.RowIndex == e.RowIndex
+                        && dgv.CurrentCell.ColumnIndex == e.ColumnIndex)
+                    {
+                        if (dgv.SelectionMode == DataGridViewSelectionMode.FullRowSelect
+                            || dgv.SelectionMode == DataGridViewSelectionMode.RowHeaderSelect)
+                        {
+                            // Для построчного выбора рамка появляется только если
+                            // строка действительно числится в SelectedRows.
+                            for (int i = 0; i < dgv.SelectedRows.Count; i++)
+                            {
+                                if (dgv.SelectedRows[i].Index == e.RowIndex)
+                                {
+                                    hasSelection = true;
+                                    break;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // Для CellSelect/ColumnSelect — рамка появляется,
+                            // только если ячейка реально выбрана.
+                            for (int i = 0; i < dgv.SelectedCells.Count; i++)
+                            {
+                                var sc = dgv.SelectedCells[i];
+                                if (sc.RowIndex == e.RowIndex && sc.ColumnIndex == e.ColumnIndex)
+                                {
+                                    hasSelection = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { hasSelection = false; }
+
+                if (hasSelection)
                 {
                     using (var bluePen = new Pen(Color.Blue, 1))
                         e.Graphics.DrawRectangle(bluePen,

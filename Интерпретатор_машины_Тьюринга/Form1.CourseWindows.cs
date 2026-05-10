@@ -1241,39 +1241,83 @@ namespace Интерпретатор_машины_Тьюринга
             gridSubs.Columns.Add("Solution", "JSON"); gridSubs.Columns[8].Visible = false;
             gridSubs.Columns.Add("Version", "Version"); gridSubs.Columns[9].Visible = false;
 
+            // Логический выбор работы в этом окне: храним именно Submission.Id
+            // (в скрытой колонке "SubId"). Поиск/фильтр НЕ сбрасывает этот
+            // выбор — выбор пропадает только когда сама работа исчезает из БД.
+            int? selectedSubId = null;
+            bool isRefreshingSubs = false;
+
             void UpdateGrid()
             {
-                gridSubs.Rows.Clear();
-                string selectedStatus = cbStatus.SelectedItem?.ToString() ?? "Все";
-                string selectedGroup = cbGroup.SelectedItem?.ToString() ?? "Все";
-                string search = txtSearchStudent.Text.Trim().ToLower();
-
-                // Только реальные сданные работы: "Не оценено" и "Оценено".
-                // "Не сдано" в эту таблицу не попадает (сервер их и так не отдаёт).
-                var filtered = submissionsFromDb.Where(s =>
-                    (s.Status == "Не оценено" || s.Status == "Оценено") &&
-                    (selectedStatus == "Все" || s.Status == selectedStatus) &&
-                    (selectedGroup == "Все" || (s.GroupName ?? "—") == selectedGroup) &&
-                    (s.StudentName ?? "").ToLower().Contains(search)
-                ).ToList();
-
-                foreach (var s in filtered)
+                isRefreshingSubs = true;
+                try
                 {
-                    string checking = s.IsBeingChecked == 1 ? "🔒 Да" : "—";
-                    string mtVersion = s.IsOutdated == 1 ? "⚠ Старая" : "Актуальная";
-                    gridSubs.Rows.Add(s.StudentName ?? "Неизвестно", s.GroupName ?? "—",
-                                      s.SubmittedAt.ToString("dd.MM.yyyy HH:mm"), s.Status,
-                                      s.Grade?.ToString() ?? "—", checking, mtVersion,
-                                      s.Id, s.SolutionJson ?? "", s.Version);
-                    // Выделить строки со старой версией МТ жёлтым цветом
-                    if (s.IsOutdated == 1)
-                        gridSubs.Rows[gridSubs.Rows.Count - 1].DefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(255, 243, 205);
+                    gridSubs.Rows.Clear();
+                    string selectedStatus = cbStatus.SelectedItem?.ToString() ?? "Все";
+                    string selectedGroup = cbGroup.SelectedItem?.ToString() ?? "Все";
+                    string search = txtSearchStudent.Text.Trim().ToLower();
+
+                    // Только реальные сданные работы: "Не оценено" и "Оценено".
+                    // "Не сдано" в эту таблицу не попадает (сервер их и так не отдаёт).
+                    var filtered = submissionsFromDb.Where(s =>
+                        (s.Status == "Не оценено" || s.Status == "Оценено") &&
+                        (selectedStatus == "Все" || s.Status == selectedStatus) &&
+                        (selectedGroup == "Все" || (s.GroupName ?? "—") == selectedGroup) &&
+                        (s.StudentName ?? "").ToLower().Contains(search)
+                    ).ToList();
+
+                    int? rowToSelect = null;
+                    int rowIdx = 0;
+                    foreach (var s in filtered)
+                    {
+                        string checking = s.IsBeingChecked == 1 ? "🔒 Да" : "—";
+                        string mtVersion = s.IsOutdated == 1 ? "⚠ Старая" : "Актуальная";
+                        gridSubs.Rows.Add(s.StudentName ?? "Неизвестно", s.GroupName ?? "—",
+                                          s.SubmittedAt.ToString("dd.MM.yyyy HH:mm"), s.Status,
+                                          s.Grade?.ToString() ?? "—", checking, mtVersion,
+                                          s.Id, s.SolutionJson ?? "", s.Version);
+                        // Выделить строки со старой версией МТ жёлтым цветом
+                        if (s.IsOutdated == 1)
+                            gridSubs.Rows[gridSubs.Rows.Count - 1].DefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(255, 243, 205);
+                        if (selectedSubId.HasValue && s.Id == selectedSubId.Value)
+                            rowToSelect = rowIdx;
+                        rowIdx++;
+                    }
+
+                    // Восстанавливаем выбор, если ранее выбранная работа видна.
+                    // Если она отфильтрована — логический выбор сохраняем, просто не подсвечиваем.
+                    gridSubs.ClearSelection();
+                    if (rowToSelect.HasValue)
+                    {
+                        try
+                        {
+                            gridSubs.CurrentCell = gridSubs.Rows[rowToSelect.Value].Cells[0];
+                            gridSubs.Rows[rowToSelect.Value].Selected = true;
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        // Нет видимой выбранной строки — убираем рамку/выделение,
+                        // но selectedSubId НЕ сбрасываем.
+                        gridSubs.BeginInvoke(new Action(() =>
+                        {
+                            try { gridSubs.CurrentCell = null; } catch { }
+                            gridSubs.ClearSelection();
+                        }));
+                    }
                 }
+                finally { isRefreshingSubs = false; }
             }
 
             async Task LoadData()
             {
                 submissionsFromDb = await ApiClient.GetSubmissionsAsync(assignmentId) ?? new List<Submission>();
+
+                // Если ранее выбранная работа исчезла из БД (удалена/изменение статуса) —
+                // сбрасываем логический выбор. Поиск/фильтр его никогда не сбрасывает.
+                if (selectedSubId.HasValue && !submissionsFromDb.Any(x => x.Id == selectedSubId.Value))
+                    selectedSubId = null;
 
                 string prevGroup = cbGroup.SelectedItem?.ToString() ?? "Все";
                 cbGroup.Items.Clear();
@@ -1334,9 +1378,19 @@ namespace Интерпретатор_машины_Тьюринга
 
             gridSubs.SelectionChanged += (s, e) =>
             {
-                if (gridSubs.CurrentCell != null && gridSubs.CurrentCell.RowIndex >= 0)
+                if (isRefreshingSubs) return;
+                if (gridSubs.CurrentCell != null && gridSubs.CurrentCell.RowIndex >= 0
+                    && gridSubs.SelectedCells.Count > 0)
                 {
-                    string st = gridSubs.Rows[gridSubs.CurrentCell.RowIndex].Cells[3].Value?.ToString() ?? "";
+                    int row = gridSubs.CurrentCell.RowIndex;
+                    // Фиксируем логический выбор только когда реально есть выделение.
+                    try
+                    {
+                        int sid = Convert.ToInt32(gridSubs.Rows[row].Cells[7].Value);
+                        if (sid > 0) selectedSubId = sid;
+                    }
+                    catch { }
+                    string st = gridSubs.Rows[row].Cells[3].Value?.ToString() ?? "";
                     // Отзыв оценки доступен в любое время — даже до дедлайна.
                     btnUnaccept.Enabled = (st == "Оценено");
                 }
@@ -1925,6 +1979,18 @@ namespace Интерпретатор_машины_Тьюринга
                 allStudents = await ApiClient.GetStudentsAsync() ?? new List<StudentUser>();
                 if (isAdmin) allTeachers = await ApiClient.GetTeachersAsync() ?? new List<StudentUser>();
 
+                // Если ранее выбранный элемент был удалён в базе — сбрасываем логический
+                // выбор (это единственный случай, когда выбор пропадает без
+                // действия пользователя). Поиск/фильтр НИКОГДА эти ID не трогают.
+                if (selectedStudentId.HasValue && !allStudents.Any(x => x.Id == selectedStudentId.Value))
+                    selectedStudentId = null;
+                if (selectedGroupId.HasValue && !allGroups.Any(x => x.Id == selectedGroupId.Value))
+                    selectedGroupId = null;
+                if (selectedCourseIdAdm.HasValue && !allCourses.Any(x => x.Id == selectedCourseIdAdm.Value))
+                    selectedCourseIdAdm = null;
+                if (selectedTeacherId.HasValue && allTeachers != null && !allTeachers.Any(x => x.Id == selectedTeacherId.Value))
+                    selectedTeacherId = null;
+
                 // Фильтр групп на вкладке "Студенты"
                 object prevGroupSel = cbStFilter.SelectedItem;
                 cbStFilter.Items.Clear();
@@ -1953,13 +2019,20 @@ namespace Интерпретатор_машины_Тьюринга
             // СОБЫТИЯ ВЫБОРА В ТАБЛИЦАХ
             // ============================================================
 
+            // Во всех SelectionChanged обновляем логический выбор только когда
+            // пользователь реально выбрал строку. Если SelectionChanged сработал
+            // побочным эффектом поиска/фильтра (выбранный элемент скрылся),
+            // логический selectedXxxId НЕ сбрасываем — он живёт до явного
+            // выбора другой строки или до удаления элемента в LoadAllData.
+
             gridStudents.SelectionChanged += (s, e) =>
             {
                 if (isRefreshingStudents) return;
                 if (gridStudents.SelectedRows.Count > 0)
-                    selectedStudentId = (gridStudents.SelectedRows[0].Tag as StudentUser)?.Id;
-                else
-                    selectedStudentId = null;
+                {
+                    int? newId = (gridStudents.SelectedRows[0].Tag as StudentUser)?.Id;
+                    if (newId.HasValue) selectedStudentId = newId;
+                }
                 UpdateStudentButtons();
             };
 
@@ -1967,9 +2040,10 @@ namespace Интерпретатор_машины_Тьюринга
             {
                 if (isRefreshingGroups) return;
                 if (gridGroups.SelectedRows.Count > 0)
-                    selectedGroupId = (gridGroups.SelectedRows[0].Tag as Group)?.Id;
-                else
-                    selectedGroupId = null;
+                {
+                    int? newId = (gridGroups.SelectedRows[0].Tag as Group)?.Id;
+                    if (newId.HasValue) selectedGroupId = newId;
+                }
                 UpdateGroupButtons();
             };
 
@@ -1977,9 +2051,10 @@ namespace Интерпретатор_машины_Тьюринга
             {
                 if (isRefreshingCoursesAdm) return;
                 if (gridCourses.SelectedRows.Count > 0)
-                    selectedCourseIdAdm = (gridCourses.SelectedRows[0].Tag as Course)?.Id;
-                else
-                    selectedCourseIdAdm = null;
+                {
+                    int? newId = (gridCourses.SelectedRows[0].Tag as Course)?.Id;
+                    if (newId.HasValue) selectedCourseIdAdm = newId;
+                }
                 UpdateCourseButtons();
             };
 
@@ -1989,9 +2064,10 @@ namespace Интерпретатор_машины_Тьюринга
                 {
                     if (isRefreshingTeachers) return;
                     if (gridTeachers.SelectedRows.Count > 0)
-                        selectedTeacherId = (gridTeachers.SelectedRows[0].Tag as StudentUser)?.Id;
-                    else
-                        selectedTeacherId = null;
+                    {
+                        int? newId = (gridTeachers.SelectedRows[0].Tag as StudentUser)?.Id;
+                        if (newId.HasValue) selectedTeacherId = newId;
+                    }
                     UpdateTeacherButtons();
                 };
             }
@@ -4337,36 +4413,73 @@ namespace Интерпретатор_машины_Тьюринга
             List<Assignment> courseAssignments = new List<Assignment>();
             int? studentId = null;
 
+            // Логический выбор строки в таблице детализации оценок: ключ — название задания.
+            // Поиск/фильтр НЕ сбрасывает selectedTaskName — выбор живёт до
+            // явного выбора другой строки или до исчезновения задания в LoadData.
+            string selectedTaskName = null;
+            bool isRefreshingGrades = false;
+
             void RefreshGradesGrid()
             {
-                gridGrades.Rows.Clear();
-                string search = txtSearch.Text.Trim().ToLower();
-                string filterType = cbType.SelectedItem?.ToString() ?? "Все";
-
-                var visible = studentGrades.Where(g => !string.IsNullOrEmpty(g.Task));
-
-                foreach (var g in visible)
+                isRefreshingGrades = true;
+                try
                 {
-                    if (!string.IsNullOrEmpty(search) && !(g.Task ?? "").ToLower().Contains(search)) continue;
-                    if (filterType != "Все" && (g.Type ?? "") != filterType) continue;
+                    gridGrades.Rows.Clear();
+                    string search = txtSearch.Text.Trim().ToLower();
+                    string filterType = cbType.SelectedItem?.ToString() ?? "Все";
 
-                    string statusText;
-                    if (g.Status == "Оценено") statusText = "Оценено";
-                    else if (g.Status == "Не оценено") statusText = "Не оценено";
-                    else statusText = "Не сдано";
+                    var visible = studentGrades.Where(g => !string.IsNullOrEmpty(g.Task));
 
+                    int? rowToSelect = null;
+                    int rowIdx = 0;
+                    foreach (var g in visible)
+                    {
+                        if (!string.IsNullOrEmpty(search) && !(g.Task ?? "").ToLower().Contains(search)) continue;
+                        if (filterType != "Все" && (g.Type ?? "") != filterType) continue;
 
-                    var assignment = courseAssignments.FirstOrDefault(a => a.Title == g.Task);
-                    int subId = 0;
-                    int aid = assignment?.Id ?? 0;
+                        string statusText;
+                        if (g.Status == "Оценено") statusText = "Оценено";
+                        else if (g.Status == "Не оценено") statusText = "Не оценено";
+                        else statusText = "Не сдано";
 
-                    gridGrades.Rows.Add(g.Task, g.Type ?? "Домашняя работа", g.Grade?.ToString() ?? "—", statusText, subId, aid);
+                        var assignment = courseAssignments.FirstOrDefault(a => a.Title == g.Task);
+                        int subId = 0;
+                        int aid = assignment?.Id ?? 0;
+
+                        gridGrades.Rows.Add(g.Task, g.Type ?? "Домашняя работа", g.Grade?.ToString() ?? "—", statusText, subId, aid);
+                        if (!string.IsNullOrEmpty(selectedTaskName) && g.Task == selectedTaskName)
+                            rowToSelect = rowIdx;
+                        rowIdx++;
+                    }
+
+                    // Восстанавливаем выделение ранее выбранной строки, если она осталась видимой.
+                    // Иначе убираем визуальный фокус (логический выбор не трогаем).
+                    gridGrades.ClearSelection();
+                    if (rowToSelect.HasValue)
+                    {
+                        try
+                        {
+                            gridGrades.Rows[rowToSelect.Value].Selected = true;
+                            gridGrades.CurrentCell = gridGrades.Rows[rowToSelect.Value].Cells[0];
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        gridGrades.BeginInvoke(new Action(() =>
+                        {
+                            try { gridGrades.CurrentCell = null; } catch { }
+                            gridGrades.ClearSelection();
+                        }));
+                    }
                 }
+                finally { isRefreshingGrades = false; }
             }
 
             void UpdateOpenButtonState()
             {
-                if (gridGrades.CurrentRow == null) { btnOpenSubmission.Enabled = false; return; }
+                if (gridGrades.CurrentRow == null || gridGrades.SelectedRows.Count == 0)
+                { btnOpenSubmission.Enabled = false; return; }
                 string st = gridGrades.CurrentRow.Cells[3].Value?.ToString() ?? "";
                 btnOpenSubmission.Enabled = (st == "Не оценено" || st == "Оценено");
             }
@@ -4421,33 +4534,67 @@ namespace Интерпретатор_машины_Тьюринга
                     txtAvg.Text = avgGrade.ToString("0.0");
                     txtFinal.Text = ((int)Math.Round(finalGrade)).ToString();
 
-                    gridGrades.Rows.Clear();
-                    string search = txtSearch.Text.Trim().ToLower();
-                    string filterType = cbType.SelectedItem?.ToString() ?? "Все";
+                    // Если ранее выбранное задание исчезло (удалено преподавателем)
+                    // — сбрасываем логический выбор. Поиск/фильтр этого НЕ делают.
+                    if (!string.IsNullOrEmpty(selectedTaskName) && !validRows.Any(g => g.Task == selectedTaskName))
+                        selectedTaskName = null;
 
-                    foreach (var g in validRows)
+                    isRefreshingGrades = true;
+                    try
                     {
-                        if (!string.IsNullOrEmpty(search) && !(g.Task ?? "").ToLower().Contains(search)) continue;
-                        if (filterType != "Все" && (g.Type ?? "") != filterType) continue;
+                        gridGrades.Rows.Clear();
+                        string search = txtSearch.Text.Trim().ToLower();
+                        string filterType = cbType.SelectedItem?.ToString() ?? "Все";
 
-                        string statusText;
-                        if (g.Status == "Оценено") statusText = "Оценено";
-                        else if (g.Status == "Не оценено") statusText = "Не оценено";
-                        else statusText = "Не сдано";
-
-
-                        var assignment = courseAssignments.FirstOrDefault(a => a.Title == g.Task);
-                        int aid = assignment?.Id ?? 0;
-                        int subId = 0;
-                        if (assignment != null)
+                        int? rowToSelect = null;
+                        int rowIdx = 0;
+                        foreach (var g in validRows)
                         {
-                            var subs = await ApiClient.GetSubmissionsAsync(assignment.Id) ?? new List<Submission>();
-                            var mySub = subs.FirstOrDefault(s => s.StudentName == studentName);
-                            if (mySub != null) subId = mySub.Id;
+                            if (!string.IsNullOrEmpty(search) && !(g.Task ?? "").ToLower().Contains(search)) continue;
+                            if (filterType != "Все" && (g.Type ?? "") != filterType) continue;
+
+                            string statusText;
+                            if (g.Status == "Оценено") statusText = "Оценено";
+                            else if (g.Status == "Не оценено") statusText = "Не оценено";
+                            else statusText = "Не сдано";
+
+                            var assignment = courseAssignments.FirstOrDefault(a => a.Title == g.Task);
+                            int aid = assignment?.Id ?? 0;
+                            int subId = 0;
+                            if (assignment != null)
+                            {
+                                var subs = await ApiClient.GetSubmissionsAsync(assignment.Id) ?? new List<Submission>();
+                                var mySub = subs.FirstOrDefault(s => s.StudentName == studentName);
+                                if (mySub != null) subId = mySub.Id;
+                            }
+
+                            gridGrades.Rows.Add(g.Task, g.Type ?? "Домашняя работа", g.Grade?.ToString() ?? "—", statusText, subId, aid);
+                            if (!string.IsNullOrEmpty(selectedTaskName) && g.Task == selectedTaskName)
+                                rowToSelect = rowIdx;
+                            rowIdx++;
                         }
 
-                        gridGrades.Rows.Add(g.Task, g.Type ?? "Домашняя работа", g.Grade?.ToString() ?? "—", statusText, subId, aid);
+                        // Восстанавливаем подсветку выбранной строки, если она видима.
+                        gridGrades.ClearSelection();
+                        if (rowToSelect.HasValue)
+                        {
+                            try
+                            {
+                                gridGrades.Rows[rowToSelect.Value].Selected = true;
+                                gridGrades.CurrentCell = gridGrades.Rows[rowToSelect.Value].Cells[0];
+                            }
+                            catch { }
+                        }
+                        else
+                        {
+                            gridGrades.BeginInvoke(new Action(() =>
+                            {
+                                try { gridGrades.CurrentCell = null; } catch { }
+                                gridGrades.ClearSelection();
+                            }));
+                        }
                     }
+                    finally { isRefreshingGrades = false; }
 
                     UpdateOpenButtonState();
                 }
@@ -4464,7 +4611,19 @@ namespace Интерпретатор_машины_Тьюринга
             txtSearch.TextChanged += (s, e) => RefreshGradesGrid();
             cbType.SelectedIndexChanged += (s, e) => RefreshGradesGrid();
             btnRefresh.Click += async (s, e) => await LoadData();
-            gridGrades.SelectionChanged += (s, e) => UpdateOpenButtonState();
+            gridGrades.SelectionChanged += (s, e) =>
+            {
+                if (isRefreshingGrades) { UpdateOpenButtonState(); return; }
+                // Фиксируем логический выбор только когда пользователь реально
+                // выбрал строку. Если выделение пропало побочным эффектом
+                // фильтра — selectedTaskName НЕ сбрасываем.
+                if (gridGrades.SelectedRows.Count > 0)
+                {
+                    string newName = gridGrades.SelectedRows[0].Cells[0].Value?.ToString();
+                    if (!string.IsNullOrEmpty(newName)) selectedTaskName = newName;
+                }
+                UpdateOpenButtonState();
+            };
 
             btnOpenSubmission.Click += async (s, e) =>
             {
@@ -4790,8 +4949,13 @@ namespace Интерпретатор_машины_Тьюринга
             }
 
             // Перестраивает список курсов с учётом поиска.
-            // Восстанавливает ранее выбранный курс, если он попадает в результаты.
-            // Если нет — снимает выделение (не авто-выделяет первую строку).
+            // ВАЖНО (UX-контракт):
+            //   • Поиск НЕ сбрасывает логический выбор (selectedCourseId).
+            //   • Если ранее выбранный курс отфильтрован — он НЕ перестаёт быть
+            //     выбранным с точки зрения данных, просто не подсвечивается визуально.
+            //   • Правая панель (задания/студенты) при наборе в поиске НЕ
+            //     перерисовывается — поэтому OnCourseChanged() здесь не вызывается.
+            //   • Авто-выбор первой строки запрещён.
             void RefreshCoursesGrid()
             {
                 isRefreshingCourses = true;
@@ -4811,18 +4975,19 @@ namespace Интерпретатор_машины_Тьюринга
                     if (rowToSelect.HasValue)
                         SelectGridRow(gridCourses, rowToSelect.Value);
                     else
-                    {
-                        selectedCourseId = null;
                         ResetGridSelection(gridCourses);
-                    }
+                    // selectedCourseId НЕ сбрасываем: он живёт пока пользователь сам
+                    // не выберет другую строку или пока курс не будет удалён в LoadAllData.
                 }
                 finally
                 {
                     isRefreshingCourses = false;
                 }
-                OnCourseChanged();
             }
 
+            // Перестраивает таблицу заданий выбранного курса с учётом поиска и фильтров.
+            // Выбор задания НЕ сбрасывается при наборе в поиске — selectedTaskId
+            // остаётся, пока пользователь сам не выберет другую строку.
             void RefreshTasksGrid()
             {
                 isRefreshingTasks = true;
@@ -4853,10 +5018,8 @@ namespace Интерпретатор_машины_Тьюринга
                     if (rowToSelect.HasValue)
                         SelectGridRow(gridTasks, rowToSelect.Value);
                     else
-                    {
-                        selectedTaskId = null;
                         ResetGridSelection(gridTasks);
-                    }
+                    // selectedTaskId НЕ сбрасываем — поиск/фильтр не должен затирать выбор.
                 }
                 catch { }
                 finally
@@ -4867,6 +5030,9 @@ namespace Интерпретатор_машины_Тьюринга
                 }
             }
 
+            // Перестраивает таблицу студентов выбранного курса с учётом поиска и фильтра группы.
+            // Выбор студента НЕ сбрасывается при наборе в поиске — selectedStudentKey
+            // остаётся, пока пользователь сам не выберет другую строку.
             void RefreshStudentsGrid()
             {
                 isRefreshingStudents = true;
@@ -4899,10 +5065,8 @@ namespace Интерпретатор_машины_Тьюринга
                     if (rowToSelect.HasValue)
                         SelectGridRow(gridStudents, rowToSelect.Value);
                     else
-                    {
-                        selectedStudentKey = null;
                         ResetGridSelection(gridStudents);
-                    }
+                    // selectedStudentKey НЕ сбрасываем — поиск/фильтр не должен затирать выбор.
                 }
                 catch { }
                 finally
@@ -4944,6 +5108,10 @@ namespace Интерпретатор_машины_Тьюринга
                     if (selectedCourseId.HasValue && !allCourses.Any(c => c.Id == selectedCourseId.Value))
                         selectedCourseId = null;
                     RefreshCoursesGrid();
+                    // После полной перезагрузки данных правую панель тоже нужно
+                    // освежить (RefreshCoursesGrid сам уже не вызывает OnCourseChanged,
+                    // потому что поиск/фильтр не должен трогать правую часть).
+                    OnCourseChanged();
                 }
                 finally
                 {
@@ -4982,12 +5150,21 @@ namespace Интерпретатор_машины_Тьюринга
             gridCourses.SelectionChanged += (s, e) =>
             {
                 if (isRefreshingCourses || isLoading) return;
+                int? newSel = null;
                 if (gridCourses.SelectedRows.Count > 0)
-                    selectedCourseId = gridCourses.SelectedRows[0].Tag as int?;
-                else
-                    selectedCourseId = null;
-                OnCourseChanged();
+                    newSel = gridCourses.SelectedRows[0].Tag as int?;
+                // Вызываем OnCourseChanged только когда пользователь реально выбрал
+                // другую строку. Если SelectionChanged вызван побочным эффектом
+                // (например, ResetGridSelection после фильтра скрыл выбранный курс),
+                // НЕ сбрасываем selectedCourseId и НЕ трогаем правую панель.
+                if (newSel.HasValue && newSel != selectedCourseId)
+                {
+                    selectedCourseId = newSel;
+                    OnCourseChanged();
+                }
             };
+            // Поиск/фильтры: только визуальное обновление соответствующей таблицы.
+            // Логический выбор во всех таблицах при этом сохраняется.
             txtSearchCourse.TextChanged += (s, e) => RefreshCoursesGrid();
             txtTaskSearch.TextChanged += (s, e) => RefreshTasksGrid();
             cbTaskType.SelectedIndexChanged += (s, e) => RefreshTasksGrid();
@@ -4997,17 +5174,24 @@ namespace Интерпретатор_машины_Тьюринга
             gridTasks.SelectionChanged += (s, e) =>
             {
                 if (isRefreshingTasks) return;
+                // Обновляем логический выбор только когда пользователь реально
+                // выбрал строку. Если SelectionChanged сработал побочным эффектом
+                // (фильтр скрыл выбранную строку) — selectedTaskId НЕ сбрасываем.
                 if (gridTasks.SelectedRows.Count > 0 && gridTasks.SelectedRows[0].Tag is int tid)
                     selectedTaskId = tid;
-                else
-                    selectedTaskId = null;
                 bool any = gridTasks.SelectedRows.Count > 0;
                 btnEditTask.Enabled = btnDeleteTask.Enabled = btnCheckTask.Enabled = any;
             };
             gridStudents.SelectionChanged += (s, e) =>
             {
                 if (isRefreshingStudents) return;
-                selectedStudentKey = gridStudents.SelectedRows.Count > 0 ? (gridStudents.SelectedRows[0].Tag as string) : null;
+                if (gridStudents.SelectedRows.Count > 0)
+                {
+                    string newKey = gridStudents.SelectedRows[0].Tag as string;
+                    if (!string.IsNullOrEmpty(newKey))
+                        selectedStudentKey = newKey;
+                }
+                // Если выбор пропал побочным эффектом (фильтр) — selectedStudentKey остаётся.
                 btnViewStudent.Enabled = gridStudents.SelectedRows.Count > 0;
             };
 
@@ -5377,8 +5561,13 @@ namespace Интерпретатор_машины_Тьюринга
             }
 
             // Перестраивает список курсов с учётом поиска.
-            // Восстанавливает ранее выбранный курс, если он попадает в результаты.
-            // Если нет — снимает выделение (не авто-выделяет первую строку).
+            // ВАЖНО (UX-контракт):
+            //   • Поиск НЕ сбрасывает логический выбор (selectedCourseId).
+            //   • Если ранее выбранный курс отфильтрован — он НЕ перестаёт быть
+            //     выбранным с точки зрения данных, просто не подсвечивается визуально.
+            //   • Правая панель (задания/статистика) при наборе в поиске НЕ
+            //     перерисовывается — поэтому OnCourseChanged() здесь не вызывается.
+            //   • Авто-выбор первой строки запрещён.
             void RefreshCoursesGrid()
             {
                 isRefreshingCourses = true;
@@ -5397,16 +5586,14 @@ namespace Интерпретатор_машины_Тьюринга
                     if (rowToSelect.HasValue)
                         SelectGridRow(gridCourses, rowToSelect.Value);
                     else
-                    {
-                        selectedCourseId = null;
                         ResetGridSelection(gridCourses);
-                    }
+                    // selectedCourseId НЕ сбрасываем: он живёт пока пользователь сам
+                    // не выберет другую строку или пока курс не будет удалён в LoadAllData.
                 }
                 finally
                 {
                     isRefreshingCourses = false;
                 }
-                OnCourseChanged();
             }
 
             void RefreshTasksAndStats()
@@ -5479,10 +5666,8 @@ namespace Интерпретатор_машины_Тьюринга
                     if (rowToSelect.HasValue)
                         SelectGridRow(gridTasks, rowToSelect.Value);
                     else
-                    {
-                        selectedTaskId = null;
                         ResetGridSelection(gridTasks);
-                    }
+                    // selectedTaskId НЕ сбрасываем — поиск/фильтр не должен затирать выбор.
                 }
                 catch { }
                 finally
@@ -5529,6 +5714,10 @@ namespace Интерпретатор_машины_Тьюринга
                     if (selectedCourseId.HasValue && !myCourses.Any(c => c.Id == selectedCourseId.Value))
                         selectedCourseId = null;
                     RefreshCoursesGrid();
+                    // После полной перезагрузки данных правую панель тоже нужно
+                    // освежить (RefreshCoursesGrid сам уже не вызывает OnCourseChanged,
+                    // потому что поиск/фильтр не должен трогать правую часть).
+                    OnCourseChanged();
                 }
                 finally
                 {
@@ -5540,12 +5729,20 @@ namespace Интерпретатор_машины_Тьюринга
             gridCourses.SelectionChanged += (s, e) =>
             {
                 if (isRefreshingCourses || isLoading) return;
+                int? newSel = null;
                 if (gridCourses.SelectedRows.Count > 0)
-                    selectedCourseId = gridCourses.SelectedRows[0].Tag as int?;
-                else
-                    selectedCourseId = null;
-                OnCourseChanged();
+                    newSel = gridCourses.SelectedRows[0].Tag as int?;
+                // Вызываем OnCourseChanged только когда выбор реально изменился.
+                // Самое важное: если SelectionChanged вызван без реального
+                // выбора (например после ResetGridSelection когда поиск скрыл
+                // выбранный курс) — НЕ сбрасываем selectedCourseId.
+                if (newSel.HasValue && newSel != selectedCourseId)
+                {
+                    selectedCourseId = newSel;
+                    OnCourseChanged();
+                }
             };
+            // Поиск по курсам — только визуальный фильтр, правую панель не трогаем.
             txtSearch.TextChanged += (s, e) => RefreshCoursesGrid();
             txtTaskSearch.TextChanged += (s, e) => RefreshTasksAndStats();
             cbType.SelectedIndexChanged += (s, e) => RefreshTasksAndStats();
@@ -5555,10 +5752,11 @@ namespace Интерпретатор_машины_Тьюринга
             gridTasks.SelectionChanged += (s, e) =>
             {
                 if (isRefreshingTasks) return;
+                // Обновляем логический выбор только когда пользователь реально
+                // выбрал строку. Если SelectionChanged сработал побочным эффектом
+                // (фильтр скрыл выбранную строку) — selectedTaskId НЕ сбрасываем.
                 if (gridTasks.SelectedRows.Count > 0 && gridTasks.SelectedRows[0].Tag is int tid)
                     selectedTaskId = tid;
-                else
-                    selectedTaskId = null;
                 btnOpenTask.Enabled = gridTasks.SelectedRows.Count > 0;
             };
 
