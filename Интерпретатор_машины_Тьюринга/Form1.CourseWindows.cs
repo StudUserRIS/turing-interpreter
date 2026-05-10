@@ -2980,6 +2980,7 @@ namespace Интерпретатор_машины_Тьюринга
             if (isAdmin)
             {
                 var teachers = await ApiClient.GetTeachersAsync();
+                cbTeacher.Items.Add("— Без преподавателя —");
                 foreach (var t in teachers) cbTeacher.Items.Add(t);
                 cbTeacher.DisplayMember = "FullName";
                 if (cbTeacher.Items.Count > 0) cbTeacher.SelectedIndex = 0;
@@ -3112,7 +3113,8 @@ namespace Интерпретатор_машины_Тьюринга
                 if (isAdmin)
                 {
                     if (cbTeacher.SelectedItem is StudentUser selT) teacherId = selT.Id;
-                    else { ShowWarningDialog("Выберите преподавателя."); return; }
+                    else if (cbTeacher.SelectedItem is string noTeacher && noTeacher == "— Без преподавателя —") teacherId = null;
+                    else { ShowWarningDialog("Выберите преподавателя или оставьте «— Без преподавателя —»."); return; }
                 }
 
                 bool archiveOnCreate = chkArchived.Checked;
@@ -3195,11 +3197,12 @@ namespace Интерпретатор_машины_Тьюринга
                 bool archiveApplied = !archiveOnCreate;
                 if (archiveOnCreate && freshCourse != null)
                 {
+                    int? freshTeacherId = freshCourse.TeacherId == 0 ? (int?)null : freshCourse.TeacherId;
                     var archRes = await ApiClient.UpdateCourseMetaAdminAsync(
                         freshCourse.Id,
                         freshCourse.Name,
                         freshCourse.Description ?? "",
-                        freshCourse.TeacherId,
+                        freshTeacherId,
                         1,
                         freshCourse.Version);
 
@@ -3529,11 +3532,12 @@ namespace Интерпретатор_машины_Тьюринга
             if (isAdmin)
             {
                 var teachers = await ApiClient.GetTeachersAsync() ?? new List<StudentUser>();
+                cbTeacher.Items.Add("— Без преподавателя —");
                 foreach (var t in teachers) cbTeacher.Items.Add(t);
                 cbTeacher.DisplayMember = "FullName";
                 var selT = teachers.FirstOrDefault(t => t.Id == origTeacherId);
                 if (selT != null) cbTeacher.SelectedItem = selT;
-                else if (cbTeacher.Items.Count > 0) cbTeacher.SelectedIndex = 0;
+                else cbTeacher.SelectedIndex = 0; // «— Без преподавателя —»
             }
             else
             {
@@ -3629,12 +3633,16 @@ namespace Интерпретатор_машины_Тьюринга
 
             EventHandler markDirty = (s, e) =>
             {
-                int curTeacherId = origTeacherId;
-                if (isAdmin && cbTeacher.SelectedItem is StudentUser su) curTeacherId = su.Id;
+                int? curTeacherId = origTeacherId == 0 ? (int?)null : origTeacherId;
+                if (isAdmin)
+                {
+                    if (cbTeacher.SelectedItem is StudentUser su) curTeacherId = su.Id;
+                    else if (cbTeacher.SelectedItem is string noT && noT == "— Без преподавателя —") curTeacherId = null;
+                }
                 int curArch = chkArchived.Checked ? 1 : 0;
 
                 bool metaChanged = txtName.Text.Trim() != origName
-                                   || curTeacherId != origTeacherId
+                                   || curTeacherId != (origTeacherId == 0 ? (int?)null : origTeacherId)
                                    || curArch != origArchived;
 
                 var origSorted = origGroupIds.OrderBy(x => x).ToList();
@@ -3691,8 +3699,12 @@ namespace Интерпретатор_машины_Тьюринга
                 chkArchived.Checked = origArchived == 1;
                 if (isAdmin && cbTeacher.Items.Count > 0)
                 {
+                    bool found = false;
                     foreach (var item in cbTeacher.Items)
-                        if (item is StudentUser su && su.Id == origTeacherId) { cbTeacher.SelectedItem = item; break; }
+                    {
+                        if (item is StudentUser su && su.Id == origTeacherId) { cbTeacher.SelectedItem = item; found = true; break; }
+                    }
+                    if (!found) cbTeacher.SelectedIndex = 0; // «— Без преподавателя —»
                 }
 
                 allGroups = await ApiClient.GetGroupsAsync() ?? new List<Group>();
@@ -3722,13 +3734,23 @@ namespace Интерпретатор_машины_Тьюринга
                 if (isAdmin)
                 {
                     if (cbTeacher.SelectedItem is StudentUser selT) newTeacherId = selT.Id;
-                    else { ShowWarningDialog("Выберите преподавателя курса."); return; }
+                    else if (cbTeacher.SelectedItem is string noT && noT == "— Без преподавателя —") newTeacherId = null;
+                    else { ShowWarningDialog("Выберите преподавателя или оставьте «— Без преподавателя —»."); return; }
                 }
                 int newArchived = chkArchived.Checked ? 1 : 0;
 
-                if (isAdmin && newTeacherId.HasValue && newTeacherId.Value != origTeacherId)
+                if (isAdmin)
                 {
-                    if (!ShowConfirmDialog("Вы меняете преподавателя курса.\n\nПрежний преподаватель потеряет доступ к этому курсу. Продолжить?", "Смена преподавателя")) return;
+                    bool hadTeacher = origTeacherId != 0;
+                    bool hasNewTeacher = newTeacherId.HasValue;
+                    if (hadTeacher && hasNewTeacher && newTeacherId.Value != origTeacherId)
+                    {
+                        if (!ShowConfirmDialog("Вы меняете преподавателя курса.\n\nПрежний преподаватель потеряет доступ к этому курсу. Продолжить?", "Смена преподавателя")) return;
+                    }
+                    else if (hadTeacher && !hasNewTeacher)
+                    {
+                        if (!ShowConfirmDialog("Вы убираете преподавателя с курса.\n\nПреподаватель потеряет доступ к этому курсу. Продолжить?", "Удаление преподавателя")) return;
+                    }
                 }
                 if (newArchived == 1 && origArchived == 0)
                 {

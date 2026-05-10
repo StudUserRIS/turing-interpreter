@@ -44,7 +44,9 @@
       "PowerShell(cd \"c:\\\\Users\\\\Иван\\\\Desktop\\\\Курсовой проект\\\\Интерпретатор\"; Get-ChildItem -Recurse -File | Where-Object {$_.Extension -in @\\(\".cs\", \".Designer.cs\"\\)} | ForEach-Object {$_.FullName})",
       "PowerShell(cd \"c:\\\\Users\\\\Иван\\\\Desktop\\\\Курсовой проект\\\\Интерпретатор\"; Get-ChildItem -Recurse -Directory | ForEach-Object {$_.FullName.Replace\\(\"c:\\\\Users\\\\Иван\\\\Desktop\\\\Курсовой проект\\\\Интерпретатор\\\\\", \"\"\\)} | Sort-Object)",
       "PowerShell(cd \"c:\\\\Users\\\\Иван\\\\Desktop\\\\Курсовой проект\\\\Интерпретатор\"; $srcFolders = @\\(\"Turing_Backend\", \"Интерпретатор_машины_Тьюринга\"\\); foreach \\($folder in $srcFolders\\) { Write-Host \"=== $folder ===\" -ForegroundColor Cyan; Get-ChildItem $folder -Recurse -Directory -Exclude bin,obj | ForEach-Object {$_.FullName.Replace\\(\"c:\\\\Users\\\\Иван\\\\Desktop\\\\Курсовой проект\\\\Интерпретатор\\\\$folder\\\\\", \"  \"\\) } | Sort-Object })",
-      "PowerShell(cd \"c:\\\\Users\\\\Иван\\\\Desktop\\\\Курсовой проект\\\\Интерпретатор\"; @\\(\"Turing_Backend\", \"Интерпретатор_машины_Тьюринга\"\\) | ForEach-Object { Write-Host \"`n=== $_ ===\" -ForegroundColor Cyan; Get-ChildItem $_ -Directory -Exclude bin,obj,Properties | ForEach-Object {$_.Name} | Sort-Object })"
+      "PowerShell(cd \"c:\\\\Users\\\\Иван\\\\Desktop\\\\Курсовой проект\\\\Интерпретатор\"; @\\(\"Turing_Backend\", \"Интерпретатор_машины_Тьюринга\"\\) | ForEach-Object { Write-Host \"`n=== $_ ===\" -ForegroundColor Cyan; Get-ChildItem $_ -Directory -Exclude bin,obj,Properties | ForEach-Object {$_.Name} | Sort-Object })",
+      "PowerShell(Get-ChildItem -Recurse \"c:\\\\Users\\\\Иван\\\\Desktop\\\\Курсовой проект\\\\Интерпретатор\" -File | Select-Object FullName | ForEach-Object { $_.FullName } | Sort-Object)",
+      "Bash(Select-Object FullName, Extension)"
     ]
   }
 }

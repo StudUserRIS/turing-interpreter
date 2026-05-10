@@ -192,12 +192,11 @@ public static class AdminEndpoints
             var (ok, err) = ValidationRules.ValidateCourseName(dto.Name);
             if (!ok) return Results.BadRequest(new { Error = err });
 
-            int teacherId;
+            int? teacherId;
             if (role == "Admin")
             {
-                if (!dto.TeacherId.HasValue)
-                    return Results.BadRequest(new { Error = "Администратор обязан выбрать преподавателя курса." });
-                teacherId = dto.TeacherId.Value;
+                // Администратор может создать курс без преподавателя (teacherId = null)
+                teacherId = dto.TeacherId;
             }
             else
             {
@@ -206,11 +205,14 @@ public static class AdminEndpoints
 
             using var db = dbFactory.Create();
 
-            var teacher = await db.QueryFirstOrDefaultAsync<User>(
-                "SELECT * FROM Users WHERE Id = @Id AND (Role = 'Teacher' OR Role = 'Admin')",
-                new { Id = teacherId });
-            if (teacher == null)
-                return Results.BadRequest(new { Error = "Указанный пользователь не является преподавателем." });
+            if (teacherId.HasValue)
+            {
+                var teacher = await db.QueryFirstOrDefaultAsync<User>(
+                    "SELECT * FROM Users WHERE Id = @Id AND (Role = 'Teacher' OR Role = 'Admin')",
+                    new { Id = teacherId.Value });
+                if (teacher == null)
+                    return Results.BadRequest(new { Error = "Указанный пользователь не является преподавателем." });
+            }
 
             string normalized = dto.Name.Trim();
             // Проверка дубликата: имя курса должно быть уникальным в системе (без учёта регистра).
@@ -227,7 +229,7 @@ public static class AdminEndpoints
             {
                 newId = await db.QuerySingleAsync<int>(
                     "INSERT INTO Courses (Name, TeacherId, Description) VALUES (@Name, @TeacherId, @Description) RETURNING Id",
-                    new { Name = normalized, TeacherId = teacherId, dto.Description });
+                    new { Name = normalized, TeacherId = teacherId.HasValue ? (object)teacherId.Value : DBNull.Value, dto.Description });
             }
             catch (Exception ex) when (PostgresErrorHelper.IsUniqueViolation(ex))
             {
@@ -575,15 +577,27 @@ public static class AdminEndpoints
                 $"Курс с названием «{normalized}» уже существует в системе. Выберите другое название.");
 
         int normalizedArchived = dto.Archived == 1 ? 1 : 0;
-        int newTeacherId = existing.TeacherId;
-        if (role == "Admin" && dto.TeacherId.HasValue && dto.TeacherId.Value != existing.TeacherId)
+        // Для учителя — teacherId остаётся прежним. Для админа — может быть изменён или сброшен в null.
+        int? newTeacherId = existing.TeacherId == 0 ? (int?)null : existing.TeacherId;
+        if (role == "Admin")
         {
-            var newTeacher = await db.QueryFirstOrDefaultAsync<User>(
-                "SELECT * FROM Users WHERE Id = @Id AND (Role = 'Teacher' OR Role = 'Admin')",
-                new { Id = dto.TeacherId.Value });
-            if (newTeacher == null)
-                return Results.BadRequest(new { Error = "Указанный пользователь не является преподавателем." });
-            newTeacherId = dto.TeacherId.Value;
+            // dto.TeacherId = null означает «без преподавателя»; HasValue — назначить конкретного
+            if (dto.TeacherId.HasValue)
+            {
+                if (dto.TeacherId.Value != existing.TeacherId)
+                {
+                    var newTeacher = await db.QueryFirstOrDefaultAsync<User>(
+                        "SELECT * FROM Users WHERE Id = @Id AND (Role = 'Teacher' OR Role = 'Admin')",
+                        new { Id = dto.TeacherId.Value });
+                    if (newTeacher == null)
+                        return Results.BadRequest(new { Error = "Указанный пользователь не является преподавателем." });
+                }
+                newTeacherId = dto.TeacherId.Value;
+            }
+            else
+            {
+                newTeacherId = null;
+            }
         }
 
         int affected;
@@ -592,7 +606,7 @@ public static class AdminEndpoints
             affected = await db.ExecuteAsync(
                 "UPDATE Courses SET Name = @Name, Description = @Description, TeacherId = @TeacherId, Archived = @Archived, Version = Version + 1, UpdatedAt = NOW() " +
                 "WHERE Id = @Id AND Version = @Version",
-                new { Name = normalized, dto.Description, TeacherId = newTeacherId, Archived = normalizedArchived, Id = id, dto.Version });
+                new { Name = normalized, dto.Description, TeacherId = newTeacherId.HasValue ? (object)newTeacherId.Value : DBNull.Value, Archived = normalizedArchived, Id = id, dto.Version });
         }
         catch (Exception ex) when (PostgresErrorHelper.IsUniqueViolation(ex))
         {
