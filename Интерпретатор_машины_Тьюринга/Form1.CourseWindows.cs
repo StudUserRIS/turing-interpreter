@@ -246,7 +246,7 @@ namespace Интерпретатор_машины_Тьюринга
             // а также на любое связанное удаление курса — в этом случае окно закрывается.
             Action<string, string, int> onBusChanged = (entity, action, id) =>
             {
-                if (gradingForm.IsDisposed) return;
+                if (gradingForm.IsDisposed || !gradingForm.IsHandleCreated) return;
                 bool relevant = (entity == "GradingPolicy" && id == courseId)
                                 || entity == "Course"
                                 || entity == "CourseGroups";
@@ -355,7 +355,7 @@ namespace Интерпретатор_машины_Тьюринга
             // формулы преподавателем или удалении курса — без участия студента.
             Action<string, string, int> onBusChanged = (entity, action, id) =>
             {
-                if (viewer.IsDisposed) return;
+                if (viewer.IsDisposed || !viewer.IsHandleCreated) return;
                 bool relevant = (entity == "GradingPolicy" && id == courseId)
                                 || entity == "Course"
                                 || entity == "CourseGroups";
@@ -668,7 +668,7 @@ namespace Интерпретатор_машины_Тьюринга
             bool autoRefreshing = false;
             Action<string, string, int> onBusChanged = (entity, action, id) =>
             {
-                if (taskDetailForm.IsDisposed) return;
+                if (taskDetailForm.IsDisposed || !taskDetailForm.IsHandleCreated) return;
                 bool relevant = (entity == "Assignment" && (id == assignmentId || id == 0))
                                 || (entity == "Submission")
                                 || (entity == "Course")
@@ -1300,11 +1300,8 @@ namespace Интерпретатор_машины_Тьюринга
                     {
                         // Нет видимой выбранной строки — убираем рамку/выделение,
                         // но selectedSubId НЕ сбрасываем.
-                        gridSubs.BeginInvoke(new Action(() =>
-                        {
-                            try { gridSubs.CurrentCell = null; } catch { }
-                            gridSubs.ClearSelection();
-                        }));
+                        try { gridSubs.CurrentCell = null; } catch { }
+                        try { gridSubs.ClearSelection(); } catch { }
                     }
                 }
                 finally { isRefreshingSubs = false; }
@@ -1464,11 +1461,14 @@ namespace Интерпретатор_машины_Тьюринга
 
             btnClose.Click += (s, e) => { checkForm.DialogResult = DialogResult.Cancel; checkForm.Close(); };
 
+            checkForm.Controls.AddRange(new Control[] { lblCourse, lblDeadlineInfo, lblStatus, cbStatus, lblGroup, cbGroup, lblStudent, txtSearchStudent, btnReset, gridSubs, btnRefresh, btnUnaccept, btnCheck, btnClose });
+            checkForm.CreateControl();
+
             await LoadData();
 
             Action<string, string, int> onBusChanged = (entity, action, id) =>
             {
-                if (checkForm.IsDisposed) return;
+                if (checkForm.IsDisposed || !checkForm.IsHandleCreated) return;
                 if (entity != "Submission" && entity != "Assignment") return;
                 try
                 {
@@ -1478,8 +1478,6 @@ namespace Интерпретатор_машины_Тьюринга
             };
             DataRefreshBus.Changed += onBusChanged;
             checkForm.FormClosed += (s, e) => { DataRefreshBus.Changed -= onBusChanged; };
-
-            checkForm.Controls.AddRange(new Control[] { lblCourse, lblDeadlineInfo, lblStatus, cbStatus, lblGroup, cbGroup, lblStudent, txtSearchStudent, btnReset, gridSubs, btnRefresh, btnUnaccept, btnCheck, btnClose });
 
             return checkForm.ShowDialog(manageForm ?? this);
         }
@@ -1729,7 +1727,7 @@ namespace Интерпретатор_машины_Тьюринга
             // (убирает синюю рамку), затем ClearSelection (убирает фон).
             void ResetGridSelection(DataGridView g)
             {
-                if (g == null) return;
+                if (g == null || !g.IsHandleCreated) return;
                 g.ClearSelection();
                 g.BeginInvoke(new Action(() =>
                 {
@@ -2354,7 +2352,7 @@ namespace Интерпретатор_машины_Тьюринга
             // студентов, преподавателей и курсов таблицы должны обновляться сами.
             Action<string, string, int> onBusChanged = (entity, action, id) =>
             {
-                if (adminForm.IsDisposed) return;
+                if (adminForm.IsDisposed || !adminForm.IsHandleCreated) return;
                 bool relevant = entity == "Group" || entity == "Course" || entity == "Student"
                                 || entity == "Teacher" || entity == "CourseGroups"
                                 || entity == "GradingPolicy";
@@ -4466,11 +4464,8 @@ namespace Интерпретатор_машины_Тьюринга
                     }
                     else
                     {
-                        gridGrades.BeginInvoke(new Action(() =>
-                        {
-                            try { gridGrades.CurrentCell = null; } catch { }
-                            gridGrades.ClearSelection();
-                        }));
+                        try { gridGrades.CurrentCell = null; } catch { }
+                        try { gridGrades.ClearSelection(); } catch { }
                     }
                 }
                 finally { isRefreshingGrades = false; }
@@ -4587,11 +4582,8 @@ namespace Интерпретатор_машины_Тьюринга
                         }
                         else
                         {
-                            gridGrades.BeginInvoke(new Action(() =>
-                            {
-                                try { gridGrades.CurrentCell = null; } catch { }
-                                gridGrades.ClearSelection();
-                            }));
+                            try { gridGrades.CurrentCell = null; } catch { }
+                            try { gridGrades.ClearSelection(); } catch { }
                         }
                     }
                     finally { isRefreshingGrades = false; }
@@ -4671,13 +4663,16 @@ namespace Интерпретатор_машины_Тьюринга
                 this.BeginInvoke(new Action(() => ActivateCheckingMode(subId, studentName, taskName, 10, mySub.SolutionJson ?? "", parentForm, mySub.Version, gradesForm)));
             };
 
+            gradesForm.Controls.AddRange(new Control[] { lblCourse, txtCourse, lblName, txtName, lblAvg, txtAvg, lblFinal, txtFinal, lblSearch, txtSearch, lblType, cbType, gridGrades, btnRefresh, btnOpenSubmission });
+            gradesForm.CreateControl();
+
             await LoadData();
 
             // Автоматическое обновление окна «Детализация оценок»: при изменении
             // работ или заданий курса — таблица обновится сама.
             Action<string, string, int> onBusChanged = (entity, action, id) =>
             {
-                if (gradesForm.IsDisposed) return;
+                if (gradesForm.IsDisposed || !gradesForm.IsHandleCreated) return;
                 if (entity != "Submission" && entity != "Assignment" && entity != "GradingPolicy") return;
                 try
                 {
@@ -4688,7 +4683,6 @@ namespace Интерпретатор_машины_Тьюринга
             DataRefreshBus.Changed += onBusChanged;
             gradesForm.FormClosed += (s, e) => { DataRefreshBus.Changed -= onBusChanged; };
 
-            gradesForm.Controls.AddRange(new Control[] { lblCourse, txtCourse, lblName, txtName, lblAvg, txtAvg, lblFinal, txtFinal, lblSearch, txtSearch, lblType, cbType, gridGrades, btnRefresh, btnOpenSubmission });
             gradesForm.ShowDialog(parentForm ?? this);
         }
 
@@ -4931,7 +4925,7 @@ namespace Интерпретатор_машины_Тьюринга
             // потому что после Rows.Add WinForms восстанавливает CurrentCell в очереди сообщений.
             void ResetGridSelection(DataGridView g)
             {
-                if (g == null) return;
+                if (g == null || !g.IsHandleCreated) return;
                 g.ClearSelection();
                 g.BeginInvoke(new Action(() =>
                 {
@@ -5334,7 +5328,7 @@ namespace Интерпретатор_машины_Тьюринга
             // сами, без нажатия пользователем кнопки «Обновить».
             Action<string, string, int> onBusChanged = (entity, action, id) =>
             {
-                if (form.IsDisposed) return;
+                if (form.IsDisposed || !form.IsHandleCreated) return;
                 // Фильтр: реагируем только на сущности, которые могут отображаться в этом окне.
                 bool relevant = entity == "Course" || entity == "Assignment" || entity == "Submission"
                                 || entity == "GradingPolicy" || entity == "CourseGroups"
@@ -5342,10 +5336,7 @@ namespace Интерпретатор_машины_Тьюринга
                 if (!relevant) return;
                 try
                 {
-                    if (form.InvokeRequired)
-                        form.BeginInvoke(new Action(async () => { try { await LoadAllData(); } catch { } }));
-                    else
-                        form.BeginInvoke(new Action(async () => { try { await LoadAllData(); } catch { } }));
+                    form.BeginInvoke(new Action(async () => { try { await LoadAllData(); } catch { } }));
                 }
                 catch { }
             };
@@ -5543,7 +5534,7 @@ namespace Интерпретатор_машины_Тьюринга
             // Программно снимает выделение и убирает синюю рамку фокуса.
             void ResetGridSelection(DataGridView g)
             {
-                if (g == null) return;
+                if (g == null || !g.IsHandleCreated) return;
                 g.ClearSelection();
                 g.BeginInvoke(new Action(() =>
                 {
@@ -5817,7 +5808,7 @@ namespace Интерпретатор_машины_Тьюринга
 
             Action<string, string, int> onBusChanged = (entity, action, id) =>
             {
-                if (form.IsDisposed) return;
+                if (form.IsDisposed || !form.IsHandleCreated) return;
                 bool relevant = entity == "Course" || entity == "Assignment" || entity == "Submission"
                                 || entity == "GradingPolicy" || entity == "CourseGroups"
                                 || entity == "Group" || entity == "Student";
