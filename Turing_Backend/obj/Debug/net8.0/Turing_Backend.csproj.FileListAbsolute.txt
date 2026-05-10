@@ -38,3 +38,4 @@ C:\Users\Иван\Desktop\Курсовой проект\Интерпретато
 C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\bin\Debug\net8.0\Microsoft.Extensions.Options.dll
 C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\bin\Debug\net8.0\Newtonsoft.Json.dll
 C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\obj\Debug\net8.0\Turing_Backend.sourcelink.json
+C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\obj\Debug\net8.0\staticwebassets.upToDateCheck.txt

@@ -1651,6 +1651,7 @@ namespace Интерпретатор_машины_Тьюринга
 
             void RefreshStudentsGrid()
             {
+                gridStudents.ClearSelection();
                 gridStudents.Rows.Clear();
                 string search = txtStSearch.Text.Trim().ToLower();
 
@@ -1677,13 +1678,14 @@ namespace Интерпретатор_машины_Тьюринга
                     int idx = gridStudents.Rows.Add(s.FullName, s.Login, groupName, lastLogin);
                     gridStudents.Rows[idx].Tag = s;
                 }
-                bool anySt = gridStudents.Rows.Count > 0 && gridStudents.SelectedRows.Count > 0;
-                btnStEdit.Enabled = anySt;
-                btnStDelete.Enabled = anySt;
+                gridStudents.ClearSelection();
+                btnStEdit.Enabled = false;
+                btnStDelete.Enabled = false;
             }
 
             void RefreshGroupsGrid()
             {
+                gridGroups.ClearSelection();
                 gridGroups.Rows.Clear();
                 string search = txtGrSearch.Text.Trim().ToLower();
                 foreach (var g in allGroups.Where(x => string.IsNullOrEmpty(search) || x.Name.ToLower().Contains(search)))
@@ -1692,13 +1694,14 @@ namespace Интерпретатор_машины_Тьюринга
                     int idx = gridGroups.Rows.Add(g.Name, cnt.ToString());
                     gridGroups.Rows[idx].Tag = g;
                 }
-                bool anyGr = gridGroups.Rows.Count > 0 && gridGroups.SelectedRows.Count > 0;
-                btnGrEdit.Enabled = anyGr;
-                btnGrDelete.Enabled = anyGr;
+                gridGroups.ClearSelection();
+                btnGrEdit.Enabled = false;
+                btnGrDelete.Enabled = false;
             }
 
             void RefreshCoursesGrid()
             {
+                gridCourses.ClearSelection();
                 gridCourses.Rows.Clear();
                 string search = txtCoSearch.Text.Trim().ToLower();
                 string filterStatus = cbCoStatus.SelectedItem?.ToString() ?? "Все";
@@ -1733,14 +1736,15 @@ namespace Интерпретатор_машины_Тьюринга
                     int idx = gridCourses.Rows.Add(c.Name, c.TeacherName ?? "—", status);
                     gridCourses.Rows[idx].Tag = c;
                 }
-                bool anyCo = gridCourses.Rows.Count > 0 && gridCourses.SelectedRows.Count > 0;
-                btnCoEdit.Enabled = anyCo;
-                btnCoDelete.Enabled = anyCo;
+                gridCourses.ClearSelection();
+                btnCoEdit.Enabled = false;
+                btnCoDelete.Enabled = false;
             }
 
             void RefreshTeachersGrid()
             {
                 if (gridTeachers == null) return;
+                gridTeachers.ClearSelection();
                 gridTeachers.Rows.Clear();
                 string search = txtTeSearch.Text.Trim().ToLower();
                 foreach (var t in allTeachers.Where(x => string.IsNullOrEmpty(search) || x.FullName.ToLower().Contains(search) || x.Login.ToLower().Contains(search)))
@@ -1749,9 +1753,9 @@ namespace Интерпретатор_машины_Тьюринга
                     int idx = gridTeachers.Rows.Add(t.FullName, t.Login, lastLogin);
                     gridTeachers.Rows[idx].Tag = t;
                 }
-                bool anyTe = gridTeachers.Rows.Count > 0 && gridTeachers.SelectedRows.Count > 0;
-                btnTeDelete.Enabled = anyTe;
-                if (btnTeEdit != null) btnTeEdit.Enabled = anyTe;
+                gridTeachers.ClearSelection();
+                btnTeDelete.Enabled = false;
+                if (btnTeEdit != null) btnTeEdit.Enabled = false;
             }
 
             // Перестраивает выпадающий фильтр преподавателей на вкладке "Курсы",
@@ -4628,21 +4632,53 @@ namespace Интерпретатор_машины_Тьюринга
             List<PerformanceRecord> allPerf = new List<PerformanceRecord>();
             List<Group> allGroups = new List<Group>();
 
-            int? GetSelectedCourseId() =>
-                gridCourses.CurrentCell != null && gridCourses.CurrentCell.RowIndex >= 0 && gridCourses.CurrentCell.RowIndex < gridCourses.Rows.Count
-                    ? (int?)gridCourses.Rows[gridCourses.CurrentCell.RowIndex].Tag : null;
+            // Флаг подавления SelectionChanged во время перестройки грида курсов
+            bool isRefreshingCourses = false;
+            // Id текущего выбранного курса (null = ничего не выбрано)
+            int? selectedCourseId = null;
+
+            int? GetSelectedCourseId() => selectedCourseId;
             Course FindCourse(int? cid) => cid.HasValue ? allCourses.FirstOrDefault(x => x.Id == cid.Value) : null;
 
+            // Перестраивает список курсов с учётом поиска.
+            // Восстанавливает ранее выбранный курс, если он попадает в результаты поиска.
+            // Если выбранный курс не найден — снимает выделение и обновляет правую панель.
             void RefreshCoursesGrid()
             {
-                gridCourses.Rows.Clear();
-                string search = txtSearchCourse.Text.Trim().ToLower();
-                foreach (var c in allCourses.Where(x => string.IsNullOrEmpty(search) || x.Name.ToLower().Contains(search)))
+                isRefreshingCourses = true;
+                try
                 {
-                    string st = c.Archived == 1 ? "🗄 Архив" : "✅";
-                    int idx = gridCourses.Rows.Add(c.Name, st);
-                    gridCourses.Rows[idx].Tag = c.Id;
+                    gridCourses.ClearSelection();
+                    gridCourses.Rows.Clear();
+                    string search = txtSearchCourse.Text.Trim().ToLower();
+                    int? rowToSelect = null;
+                    foreach (var c in allCourses.Where(x => string.IsNullOrEmpty(search) || x.Name.ToLower().Contains(search)))
+                    {
+                        string st = c.Archived == 1 ? "🗄 Архив" : "✅";
+                        int idx = gridCourses.Rows.Add(c.Name, st);
+                        gridCourses.Rows[idx].Tag = c.Id;
+                        if (selectedCourseId.HasValue && c.Id == selectedCourseId.Value)
+                            rowToSelect = idx;
+                    }
+                    if (rowToSelect.HasValue)
+                    {
+                        gridCourses.Rows[rowToSelect.Value].Selected = true;
+                        gridCourses.CurrentCell = gridCourses.Rows[rowToSelect.Value].Cells[0];
+                    }
+                    else
+                    {
+                        // Выбранный курс не входит в результаты поиска — сбрасываем выбор
+                        selectedCourseId = null;
+                        gridCourses.ClearSelection();
+                        if (gridCourses.Rows.Count > 0)
+                            gridCourses.CurrentCell = null;
+                    }
                 }
+                finally
+                {
+                    isRefreshingCourses = false;
+                }
+                OnCourseChanged();
             }
 
             void RefreshTasksGrid()
@@ -4727,12 +4763,10 @@ namespace Интерпретатор_машины_Тьюринга
                     try { allAssignments = await ApiClient.GetAssignmentsAsync() ?? new List<Assignment>(); } catch { allAssignments = new List<Assignment>(); }
                     try { allPerf = await ApiClient.GetGlobalPerformanceAsync() ?? new List<PerformanceRecord>(); } catch { allPerf = new List<PerformanceRecord>(); }
                     try { allGroups = await ApiClient.GetGroupsAsync() ?? new List<Group>(); } catch { allGroups = new List<Group>(); }
-                    int? prevCid = GetSelectedCourseId();
+                    // Если выбранный курс был удалён — сбрасываем выбор
+                    if (selectedCourseId.HasValue && !allCourses.Any(c => c.Id == selectedCourseId.Value))
+                        selectedCourseId = null;
                     RefreshCoursesGrid();
-                    if (prevCid.HasValue)
-                        for (int i = 0; i < gridCourses.Rows.Count; i++)
-                            if ((int)gridCourses.Rows[i].Tag == prevCid.Value) { gridCourses.CurrentCell = gridCourses.Rows[i].Cells[0]; break; }
-                    OnCourseChanged();
                 }
                 finally
                 {
@@ -4759,7 +4793,17 @@ namespace Интерпретатор_машины_Тьюринга
                 RefreshStudentsGrid();
             }
 
-            gridCourses.SelectionChanged += (s, e) => { if (!isLoading) OnCourseChanged(); };
+            gridCourses.SelectionChanged += (s, e) =>
+            {
+                if (isRefreshingCourses || isLoading) return;
+                // Обновляем selectedCourseId на основе реального клика пользователя
+                if (gridCourses.CurrentCell != null && gridCourses.CurrentCell.RowIndex >= 0
+                    && gridCourses.CurrentCell.RowIndex < gridCourses.Rows.Count)
+                    selectedCourseId = (int?)gridCourses.Rows[gridCourses.CurrentCell.RowIndex].Tag;
+                else
+                    selectedCourseId = null;
+                OnCourseChanged();
+            };
             txtSearchCourse.TextChanged += (s, e) => RefreshCoursesGrid();
             txtTaskSearch.TextChanged += (s, e) => RefreshTasksGrid();
             cbTaskType.SelectedIndexChanged += (s, e) => RefreshTasksGrid();
@@ -5091,6 +5135,11 @@ namespace Интерпретатор_машины_Тьюринга
             List<Assignment> myAssignments = new List<Assignment>();
             List<StudentTaskRecord> myPerf = new List<StudentTaskRecord>();
 
+            // Флаг подавления SelectionChanged во время перестройки грида курсов
+            bool isRefreshingCourses = false;
+            // Id текущего выбранного курса (null = ничего не выбрано)
+            int? selectedCourseId = null;
+
             // НОВАЯ функция определения статуса работы студента.
             string GetStudentStatus(Assignment a)
             {
@@ -5101,21 +5150,48 @@ namespace Интерпретатор_машины_Тьюринга
                 return "Не сдано";
             }
 
-            int? GetSelectedCourseId() =>
-                gridCourses.CurrentCell != null && gridCourses.CurrentCell.RowIndex >= 0 && gridCourses.CurrentCell.RowIndex < gridCourses.Rows.Count
-                    ? (int?)gridCourses.Rows[gridCourses.CurrentCell.RowIndex].Tag : null;
+            int? GetSelectedCourseId() => selectedCourseId;
             Course FindCourse(int? cid) => cid.HasValue ? myCourses.FirstOrDefault(x => x.Id == cid.Value) : null;
             string GetCourseName() { var c = FindCourse(GetSelectedCourseId()); return c?.Name ?? ""; }
 
+            // Перестраивает список курсов с учётом поиска.
+            // Восстанавливает ранее выбранный курс, если он попадает в результаты поиска.
+            // Если выбранный курс не найден — снимает выделение и обновляет правую панель.
             void RefreshCoursesGrid()
             {
-                gridCourses.Rows.Clear();
-                string s = txtSearch.Text.Trim().ToLower();
-                foreach (var c in myCourses.Where(x => string.IsNullOrEmpty(s) || x.Name.ToLower().Contains(s)))
+                isRefreshingCourses = true;
+                try
                 {
-                    int idx = gridCourses.Rows.Add(c.Name);
-                    gridCourses.Rows[idx].Tag = c.Id;
+                    gridCourses.ClearSelection();
+                    gridCourses.Rows.Clear();
+                    string s = txtSearch.Text.Trim().ToLower();
+                    int? rowToSelect = null;
+                    foreach (var c in myCourses.Where(x => string.IsNullOrEmpty(s) || x.Name.ToLower().Contains(s)))
+                    {
+                        int idx = gridCourses.Rows.Add(c.Name);
+                        gridCourses.Rows[idx].Tag = c.Id;
+                        if (selectedCourseId.HasValue && c.Id == selectedCourseId.Value)
+                            rowToSelect = idx;
+                    }
+                    if (rowToSelect.HasValue)
+                    {
+                        gridCourses.Rows[rowToSelect.Value].Selected = true;
+                        gridCourses.CurrentCell = gridCourses.Rows[rowToSelect.Value].Cells[0];
+                    }
+                    else
+                    {
+                        // Выбранный курс не входит в результаты поиска — сбрасываем выбор
+                        selectedCourseId = null;
+                        gridCourses.ClearSelection();
+                        if (gridCourses.Rows.Count > 0)
+                            gridCourses.CurrentCell = null;
+                    }
                 }
+                finally
+                {
+                    isRefreshingCourses = false;
+                }
+                OnCourseChanged();
             }
 
             void RefreshTasksAndStats()
@@ -5215,12 +5291,10 @@ namespace Интерпретатор_машины_Тьюринга
                     try { myAssignments = await ApiClient.GetAssignmentsAsync() ?? new List<Assignment>(); } catch { myAssignments = new List<Assignment>(); }
                     try { myPerf = await ApiClient.GetMyPerformanceAsync() ?? new List<StudentTaskRecord>(); } catch { myPerf = new List<StudentTaskRecord>(); }
 
-                    int? prevCid = GetSelectedCourseId();
+                    // Если выбранный курс был удалён — сбрасываем выбор
+                    if (selectedCourseId.HasValue && !myCourses.Any(c => c.Id == selectedCourseId.Value))
+                        selectedCourseId = null;
                     RefreshCoursesGrid();
-                    if (prevCid.HasValue)
-                        for (int i = 0; i < gridCourses.Rows.Count; i++)
-                            if ((int)gridCourses.Rows[i].Tag == prevCid.Value) { gridCourses.CurrentCell = gridCourses.Rows[i].Cells[0]; break; }
-                    OnCourseChanged();
                 }
                 finally
                 {
@@ -5229,7 +5303,17 @@ namespace Интерпретатор_машины_Тьюринга
                 }
             }
 
-            gridCourses.SelectionChanged += (s, e) => { if (!isLoading) OnCourseChanged(); };
+            gridCourses.SelectionChanged += (s, e) =>
+            {
+                if (isRefreshingCourses || isLoading) return;
+                // Обновляем selectedCourseId на основе реального клика пользователя
+                if (gridCourses.CurrentCell != null && gridCourses.CurrentCell.RowIndex >= 0
+                    && gridCourses.CurrentCell.RowIndex < gridCourses.Rows.Count)
+                    selectedCourseId = (int?)gridCourses.Rows[gridCourses.CurrentCell.RowIndex].Tag;
+                else
+                    selectedCourseId = null;
+                OnCourseChanged();
+            };
             txtSearch.TextChanged += (s, e) => RefreshCoursesGrid();
             txtTaskSearch.TextChanged += (s, e) => RefreshTasksAndStats();
             cbType.SelectedIndexChanged += (s, e) => RefreshTasksAndStats();
