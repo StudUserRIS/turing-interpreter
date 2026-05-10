@@ -1648,114 +1648,231 @@ namespace Интерпретатор_машины_Тьюринга
             // ============================================================
             // ФУНКЦИИ ОБНОВЛЕНИЯ ТАБЛИЦ
             // ============================================================
+            //
+            // Единая логика поиска/фильтрации для всех таблиц окна:
+            //   • При открытии окна — ни одна строка не выделена.
+            //   • Изменение поиска или фильтра НЕ сбрасывает текущий выбор:
+            //     если выбранный элемент остаётся в результатах — он
+            //     остаётся выделенным; если уходит — выделение снимается.
+            //     Сбрасывать выбор может только сам пользователь (клик)
+            //     или подтверждённое удаление/обновление данных.
+            //   • Авто-выделение первой строки запрещено (CurrentCell=null
+            //     после Rows.Add, иначе DataGridView сам ставит фокус на [0]).
+            //
+            // Флаги isRefreshing* подавляют SelectionChanged во время
+            // программной перестройки строк, чтобы не затирать сохранённый Id.
+
+            bool isRefreshingStudents = false;
+            bool isRefreshingGroups = false;
+            bool isRefreshingCoursesAdm = false;
+            bool isRefreshingTeachers = false;
+            int? selectedStudentId = null;
+            int? selectedGroupId = null;
+            int? selectedCourseIdAdm = null;
+            int? selectedTeacherId = null;
+
+            // Программно снимает выделение и фокус ячейки. Сначала CurrentCell=null
+            // (убирает синюю рамку), затем ClearSelection (убирает фон).
+            void ResetGridSelection(DataGridView g)
+            {
+                if (g == null) return;
+                try { g.CurrentCell = null; } catch { }
+                g.ClearSelection();
+            }
 
             void RefreshStudentsGrid()
             {
-                gridStudents.ClearSelection();
-                gridStudents.Rows.Clear();
-                string search = txtStSearch.Text.Trim().ToLower();
+                isRefreshingStudents = true;
+                try
+                {
+                    gridStudents.Rows.Clear();
+                    string search = txtStSearch.Text.Trim().ToLower();
 
-                int? filterGroupId = null;
-                bool filterNoGroup = false;
-                if (cbStFilter.SelectedItem is Group selG)
-                {
-                    filterGroupId = selG.Id;
-                }
-                else if (cbStFilter.SelectedItem is string sFilter && sFilter == "— Без группы —")
-                {
-                    filterNoGroup = true;
-                }
+                    int? filterGroupId = null;
+                    bool filterNoGroup = false;
+                    if (cbStFilter.SelectedItem is Group selG)
+                    {
+                        filterGroupId = selG.Id;
+                    }
+                    else if (cbStFilter.SelectedItem is string sFilter && sFilter == "— Без группы —")
+                    {
+                        filterNoGroup = true;
+                    }
 
-                foreach (var s in allStudents
-                    .Where(x => string.IsNullOrEmpty(search) || x.FullName.ToLower().Contains(search) || x.Login.ToLower().Contains(search))
-                    .Where(x =>
-                        (!filterGroupId.HasValue && !filterNoGroup) ||
-                        (filterGroupId.HasValue && x.GroupId == filterGroupId.Value) ||
-                        (filterNoGroup && !x.GroupId.HasValue)))
-                {
-                    string groupName = s.GroupId.HasValue ? (allGroups.FirstOrDefault(g => g.Id == s.GroupId.Value)?.Name ?? "—") : "—";
-                    string lastLogin = s.LastLoginAt.HasValue ? s.LastLoginAt.Value.ToString("dd.MM.yyyy HH:mm") : "—";
-                    int idx = gridStudents.Rows.Add(s.FullName, s.Login, groupName, lastLogin);
-                    gridStudents.Rows[idx].Tag = s;
+                    int? rowToSelect = null;
+                    foreach (var s in allStudents
+                        .Where(x => string.IsNullOrEmpty(search) || x.FullName.ToLower().Contains(search) || x.Login.ToLower().Contains(search))
+                        .Where(x =>
+                            (!filterGroupId.HasValue && !filterNoGroup) ||
+                            (filterGroupId.HasValue && x.GroupId == filterGroupId.Value) ||
+                            (filterNoGroup && !x.GroupId.HasValue)))
+                    {
+                        string groupName = s.GroupId.HasValue ? (allGroups.FirstOrDefault(g => g.Id == s.GroupId.Value)?.Name ?? "—") : "—";
+                        string lastLogin = s.LastLoginAt.HasValue ? s.LastLoginAt.Value.ToString("dd.MM.yyyy HH:mm") : "—";
+                        int idx = gridStudents.Rows.Add(s.FullName, s.Login, groupName, lastLogin);
+                        gridStudents.Rows[idx].Tag = s;
+                        if (selectedStudentId.HasValue && s.Id == selectedStudentId.Value)
+                            rowToSelect = idx;
+                    }
+
+                    if (rowToSelect.HasValue)
+                    {
+                        gridStudents.CurrentCell = gridStudents.Rows[rowToSelect.Value].Cells[0];
+                        gridStudents.Rows[rowToSelect.Value].Selected = true;
+                    }
+                    else
+                    {
+                        ResetGridSelection(gridStudents);
+                    }
                 }
-                gridStudents.ClearSelection();
-                btnStEdit.Enabled = false;
-                btnStDelete.Enabled = false;
+                finally { isRefreshingStudents = false; }
+                UpdateStudentButtons();
+            }
+
+            void UpdateStudentButtons()
+            {
+                bool any = gridStudents.SelectedRows.Count > 0;
+                btnStEdit.Enabled = any;
+                btnStDelete.Enabled = any;
             }
 
             void RefreshGroupsGrid()
             {
-                gridGroups.ClearSelection();
-                gridGroups.Rows.Clear();
-                string search = txtGrSearch.Text.Trim().ToLower();
-                foreach (var g in allGroups.Where(x => string.IsNullOrEmpty(search) || x.Name.ToLower().Contains(search)))
+                isRefreshingGroups = true;
+                try
                 {
-                    int cnt = allStudents.Count(s => s.GroupId == g.Id);
-                    int idx = gridGroups.Rows.Add(g.Name, cnt.ToString());
-                    gridGroups.Rows[idx].Tag = g;
+                    gridGroups.Rows.Clear();
+                    string search = txtGrSearch.Text.Trim().ToLower();
+                    int? rowToSelect = null;
+                    foreach (var g in allGroups.Where(x => string.IsNullOrEmpty(search) || x.Name.ToLower().Contains(search)))
+                    {
+                        int cnt = allStudents.Count(s => s.GroupId == g.Id);
+                        int idx = gridGroups.Rows.Add(g.Name, cnt.ToString());
+                        gridGroups.Rows[idx].Tag = g;
+                        if (selectedGroupId.HasValue && g.Id == selectedGroupId.Value)
+                            rowToSelect = idx;
+                    }
+                    if (rowToSelect.HasValue)
+                    {
+                        gridGroups.CurrentCell = gridGroups.Rows[rowToSelect.Value].Cells[0];
+                        gridGroups.Rows[rowToSelect.Value].Selected = true;
+                    }
+                    else
+                    {
+                        ResetGridSelection(gridGroups);
+                    }
                 }
-                gridGroups.ClearSelection();
-                btnGrEdit.Enabled = false;
-                btnGrDelete.Enabled = false;
+                finally { isRefreshingGroups = false; }
+                UpdateGroupButtons();
+            }
+
+            void UpdateGroupButtons()
+            {
+                bool any = gridGroups.SelectedRows.Count > 0;
+                btnGrEdit.Enabled = any;
+                btnGrDelete.Enabled = any;
             }
 
             void RefreshCoursesGrid()
             {
-                gridCourses.ClearSelection();
-                gridCourses.Rows.Clear();
-                string search = txtCoSearch.Text.Trim().ToLower();
-                string filterStatus = cbCoStatus.SelectedItem?.ToString() ?? "Все";
+                isRefreshingCoursesAdm = true;
+                try
+                {
+                    gridCourses.Rows.Clear();
+                    string search = txtCoSearch.Text.Trim().ToLower();
+                    string filterStatus = cbCoStatus.SelectedItem?.ToString() ?? "Все";
 
-                // Определяем выбранного преподавателя:
-                //   "Все"           → null
-                //   "— Без преподавателя —" → специальный режим (TeacherId = 0/неназначен)
-                //   StudentUser     → конкретный Id
-                int? filterTeacherId = null;
-                bool filterNoTeacher = false;
-                if (cbCoTeacher.SelectedItem is StudentUser selT)
-                {
-                    filterTeacherId = selT.Id;
-                }
-                else if (cbCoTeacher.SelectedItem is string sT && sT == "— Без преподавателя —")
-                {
-                    filterNoTeacher = true;
-                }
+                    // Определяем выбранного преподавателя:
+                    //   "Все"           → null
+                    //   "— Без преподавателя —" → специальный режим (TeacherId = 0/неназначен)
+                    //   StudentUser     → конкретный Id
+                    int? filterTeacherId = null;
+                    bool filterNoTeacher = false;
+                    if (cbCoTeacher.SelectedItem is StudentUser selT)
+                    {
+                        filterTeacherId = selT.Id;
+                    }
+                    else if (cbCoTeacher.SelectedItem is string sT && sT == "— Без преподавателя —")
+                    {
+                        filterNoTeacher = true;
+                    }
 
-                foreach (var c in allCourses
-                            .Where(x => string.IsNullOrEmpty(search) || (x.Name ?? "").ToLower().Contains(search))
-                            .Where(x =>
-                                filterStatus == "Все" ||
-                                (filterStatus == "Активные" && x.Archived == 0) ||
-                                (filterStatus == "В архиве" && x.Archived == 1))
-                            .Where(x =>
-                                (!filterTeacherId.HasValue && !filterNoTeacher) ||
-                                (filterTeacherId.HasValue && x.TeacherId == filterTeacherId.Value) ||
-                                (filterNoTeacher && (x.TeacherId == 0 || string.IsNullOrEmpty(x.TeacherName)))))
-                {
-                    string status = c.Archived == 1 ? "🗄 Архив" : "✅ Активен";
-                    int idx = gridCourses.Rows.Add(c.Name, c.TeacherName ?? "—", status);
-                    gridCourses.Rows[idx].Tag = c;
+                    int? rowToSelect = null;
+                    foreach (var c in allCourses
+                                .Where(x => string.IsNullOrEmpty(search) || (x.Name ?? "").ToLower().Contains(search))
+                                .Where(x =>
+                                    filterStatus == "Все" ||
+                                    (filterStatus == "Активные" && x.Archived == 0) ||
+                                    (filterStatus == "В архиве" && x.Archived == 1))
+                                .Where(x =>
+                                    (!filterTeacherId.HasValue && !filterNoTeacher) ||
+                                    (filterTeacherId.HasValue && x.TeacherId == filterTeacherId.Value) ||
+                                    (filterNoTeacher && (x.TeacherId == 0 || string.IsNullOrEmpty(x.TeacherName)))))
+                    {
+                        string status = c.Archived == 1 ? "🗄 Архив" : "✅ Активен";
+                        int idx = gridCourses.Rows.Add(c.Name, c.TeacherName ?? "—", status);
+                        gridCourses.Rows[idx].Tag = c;
+                        if (selectedCourseIdAdm.HasValue && c.Id == selectedCourseIdAdm.Value)
+                            rowToSelect = idx;
+                    }
+                    if (rowToSelect.HasValue)
+                    {
+                        gridCourses.CurrentCell = gridCourses.Rows[rowToSelect.Value].Cells[0];
+                        gridCourses.Rows[rowToSelect.Value].Selected = true;
+                    }
+                    else
+                    {
+                        ResetGridSelection(gridCourses);
+                    }
                 }
-                gridCourses.ClearSelection();
-                btnCoEdit.Enabled = false;
-                btnCoDelete.Enabled = false;
+                finally { isRefreshingCoursesAdm = false; }
+                UpdateCourseButtons();
+            }
+
+            void UpdateCourseButtons()
+            {
+                bool any = gridCourses.SelectedRows.Count > 0;
+                btnCoEdit.Enabled = any;
+                btnCoDelete.Enabled = any;
             }
 
             void RefreshTeachersGrid()
             {
                 if (gridTeachers == null) return;
-                gridTeachers.ClearSelection();
-                gridTeachers.Rows.Clear();
-                string search = txtTeSearch.Text.Trim().ToLower();
-                foreach (var t in allTeachers.Where(x => string.IsNullOrEmpty(search) || x.FullName.ToLower().Contains(search) || x.Login.ToLower().Contains(search)))
+                isRefreshingTeachers = true;
+                try
                 {
-                    string lastLogin = t.LastLoginAt.HasValue ? t.LastLoginAt.Value.ToString("dd.MM.yyyy HH:mm") : "—";
-                    int idx = gridTeachers.Rows.Add(t.FullName, t.Login, lastLogin);
-                    gridTeachers.Rows[idx].Tag = t;
+                    gridTeachers.Rows.Clear();
+                    string search = txtTeSearch.Text.Trim().ToLower();
+                    int? rowToSelect = null;
+                    foreach (var t in allTeachers.Where(x => string.IsNullOrEmpty(search) || x.FullName.ToLower().Contains(search) || x.Login.ToLower().Contains(search)))
+                    {
+                        string lastLogin = t.LastLoginAt.HasValue ? t.LastLoginAt.Value.ToString("dd.MM.yyyy HH:mm") : "—";
+                        int idx = gridTeachers.Rows.Add(t.FullName, t.Login, lastLogin);
+                        gridTeachers.Rows[idx].Tag = t;
+                        if (selectedTeacherId.HasValue && t.Id == selectedTeacherId.Value)
+                            rowToSelect = idx;
+                    }
+                    if (rowToSelect.HasValue)
+                    {
+                        gridTeachers.CurrentCell = gridTeachers.Rows[rowToSelect.Value].Cells[0];
+                        gridTeachers.Rows[rowToSelect.Value].Selected = true;
+                    }
+                    else
+                    {
+                        ResetGridSelection(gridTeachers);
+                    }
                 }
-                gridTeachers.ClearSelection();
-                btnTeDelete.Enabled = false;
-                if (btnTeEdit != null) btnTeEdit.Enabled = false;
+                finally { isRefreshingTeachers = false; }
+                UpdateTeacherButtons();
+            }
+
+            void UpdateTeacherButtons()
+            {
+                if (gridTeachers == null) return;
+                bool any = gridTeachers.SelectedRows.Count > 0;
+                btnTeDelete.Enabled = any;
+                if (btnTeEdit != null) btnTeEdit.Enabled = any;
             }
 
             // Перестраивает выпадающий фильтр преподавателей на вкладке "Курсы",
@@ -1847,32 +1964,44 @@ namespace Интерпретатор_машины_Тьюринга
 
             gridStudents.SelectionChanged += (s, e) =>
             {
-                bool any = gridStudents.SelectedRows.Count > 0;
-                btnStEdit.Enabled = any;
-                btnStDelete.Enabled = any;
+                if (isRefreshingStudents) return;
+                if (gridStudents.SelectedRows.Count > 0)
+                    selectedStudentId = (gridStudents.SelectedRows[0].Tag as StudentUser)?.Id;
+                else
+                    selectedStudentId = null;
+                UpdateStudentButtons();
             };
 
             gridGroups.SelectionChanged += (s, e) =>
             {
-                bool any = gridGroups.SelectedRows.Count > 0;
-                btnGrEdit.Enabled = any;
-                btnGrDelete.Enabled = any;
+                if (isRefreshingGroups) return;
+                if (gridGroups.SelectedRows.Count > 0)
+                    selectedGroupId = (gridGroups.SelectedRows[0].Tag as Group)?.Id;
+                else
+                    selectedGroupId = null;
+                UpdateGroupButtons();
             };
 
             gridCourses.SelectionChanged += (s, e) =>
             {
-                bool any = gridCourses.SelectedRows.Count > 0;
-                btnCoEdit.Enabled = any;
-                btnCoDelete.Enabled = any;
+                if (isRefreshingCoursesAdm) return;
+                if (gridCourses.SelectedRows.Count > 0)
+                    selectedCourseIdAdm = (gridCourses.SelectedRows[0].Tag as Course)?.Id;
+                else
+                    selectedCourseIdAdm = null;
+                UpdateCourseButtons();
             };
 
             if (gridTeachers != null)
             {
                 gridTeachers.SelectionChanged += (s, e) =>
                 {
-                    bool any = gridTeachers.SelectedRows.Count > 0;
-                    btnTeEdit.Enabled = any;
-                    btnTeDelete.Enabled = any;
+                    if (isRefreshingTeachers) return;
+                    if (gridTeachers.SelectedRows.Count > 0)
+                        selectedTeacherId = (gridTeachers.SelectedRows[0].Tag as StudentUser)?.Id;
+                    else
+                        selectedTeacherId = null;
+                    UpdateTeacherButtons();
                 };
             }
 
@@ -4632,13 +4761,28 @@ namespace Интерпретатор_машины_Тьюринга
             List<PerformanceRecord> allPerf = new List<PerformanceRecord>();
             List<Group> allGroups = new List<Group>();
 
-            // Флаг подавления SelectionChanged во время перестройки грида курсов
+            // Флаги подавления SelectionChanged во время программной перестройки гридов.
+            // Id/ключи текущего выбора (null/"" = ничего не выбрано).
+            // Поиск/фильтр НЕ сбрасывает выбор: если элемент остаётся в выборке —
+            // он остаётся выделенным; если уходит — выделение снимается. Авто-выбор
+            // первой строки при открытии или при наборе в поиске запрещён.
             bool isRefreshingCourses = false;
-            // Id текущего выбранного курса (null = ничего не выбрано)
+            bool isRefreshingTasks = false;
+            bool isRefreshingStudents = false;
             int? selectedCourseId = null;
+            int? selectedTaskId = null;
+            string selectedStudentKey = null; // "Имя|Группа"
 
             int? GetSelectedCourseId() => selectedCourseId;
             Course FindCourse(int? cid) => cid.HasValue ? allCourses.FirstOrDefault(x => x.Id == cid.Value) : null;
+
+            // Программно снимает выделение и фокус ячейки.
+            void ResetGridSelection(DataGridView g)
+            {
+                if (g == null) return;
+                try { g.CurrentCell = null; } catch { }
+                g.ClearSelection();
+            }
 
             // Перестраивает список курсов с учётом поиска.
             // Восстанавливает ранее выбранный курс, если он попадает в результаты поиска.
@@ -4648,7 +4792,6 @@ namespace Интерпретатор_машины_Тьюринга
                 isRefreshingCourses = true;
                 try
                 {
-                    gridCourses.ClearSelection();
                     gridCourses.Rows.Clear();
                     string search = txtSearchCourse.Text.Trim().ToLower();
                     int? rowToSelect = null;
@@ -4662,16 +4805,14 @@ namespace Интерпретатор_машины_Тьюринга
                     }
                     if (rowToSelect.HasValue)
                     {
-                        gridCourses.Rows[rowToSelect.Value].Selected = true;
                         gridCourses.CurrentCell = gridCourses.Rows[rowToSelect.Value].Cells[0];
+                        gridCourses.Rows[rowToSelect.Value].Selected = true;
                     }
                     else
                     {
                         // Выбранный курс не входит в результаты поиска — сбрасываем выбор
                         selectedCourseId = null;
-                        gridCourses.ClearSelection();
-                        if (gridCourses.Rows.Count > 0)
-                            gridCourses.CurrentCell = null;
+                        ResetGridSelection(gridCourses);
                     }
                 }
                 finally
@@ -4683,13 +4824,14 @@ namespace Интерпретатор_машины_Тьюринга
 
             void RefreshTasksGrid()
             {
+                isRefreshingTasks = true;
                 try
                 {
                     gridTasks.Rows.Clear();
                     var c = FindCourse(GetSelectedCourseId());
-                    if (c == null) { btnCreateTask.Enabled = false; return; }
+                    if (c == null) { btnCreateTask.Enabled = false; ResetGridSelection(gridTasks); return; }
                     btnCreateTask.Enabled = true;
-                    if (allAssignments == null) return;
+                    if (allAssignments == null) { ResetGridSelection(gridTasks); return; }
                     string search = txtTaskSearch.Text.Trim().ToLower();
                     string filterType = cbTaskType.SelectedItem?.ToString() ?? "Все";
                     string filterStatus = cbTaskStatus.SelectedItem?.ToString() ?? "Все";
@@ -4699,29 +4841,50 @@ namespace Интерпретатор_машины_Тьюринга
                         .Where(a => filterType == "Все" || (a.Type ?? "") == filterType)
                         .Where(a => filterStatus == "Все" || (a.Status ?? "") == filterStatus)
                         .OrderBy(a => a.Deadline).ToList();
+                    int? rowToSelect = null;
                     foreach (var a in filtered)
                     {
                         int idx = gridTasks.Rows.Add(a.Title ?? "(без названия)", a.Type ?? "Домашняя работа", a.Deadline.ToString("dd.MM.yyyy HH:mm"), a.Status ?? "Черновик");
                         gridTasks.Rows[idx].Tag = a.Id;
+                        if (selectedTaskId.HasValue && a.Id == selectedTaskId.Value)
+                            rowToSelect = idx;
+                    }
+                    if (rowToSelect.HasValue)
+                    {
+                        gridTasks.CurrentCell = gridTasks.Rows[rowToSelect.Value].Cells[0];
+                        gridTasks.Rows[rowToSelect.Value].Selected = true;
+                    }
+                    else
+                    {
+                        selectedTaskId = null;
+                        ResetGridSelection(gridTasks);
                     }
                 }
                 catch { }
+                finally
+                {
+                    isRefreshingTasks = false;
+                    bool any = gridTasks.SelectedRows.Count > 0;
+                    btnEditTask.Enabled = btnDeleteTask.Enabled = btnCheckTask.Enabled = any;
+                }
             }
 
             void RefreshStudentsGrid()
             {
+                isRefreshingStudents = true;
                 try
                 {
                     gridStudents.Rows.Clear();
                     var c = FindCourse(GetSelectedCourseId());
-                    if (c == null) return;
-                    if (allPerf == null) return;
+                    if (c == null) { ResetGridSelection(gridStudents); return; }
+                    if (allPerf == null) { ResetGridSelection(gridStudents); return; }
                     string search = txtStudSearch.Text.Trim().ToLower();
                     string filterGroup = cbStudGroup.SelectedItem?.ToString() ?? "Все";
                     var grouped = allPerf.Where(p => p != null && p.Course == c.Name)
                         .GroupBy(p => new { Name = p.Name ?? "—", Group = p.Group ?? "—" })
                         .Where(g => string.IsNullOrEmpty(search) || g.Key.Name.ToLower().Contains(search))
                         .Where(g => filterGroup == "Все" || g.Key.Group == filterGroup).ToList();
+                    int? rowToSelect = null;
                     foreach (var g in grouped)
                     {
                         var withTask = g.Where(x => !string.IsNullOrEmpty(x.Task)).ToList();
@@ -4729,10 +4892,29 @@ namespace Интерпретатор_машины_Тьюринга
                         int done = withTask.Count(x => x.Status == "Оценено");
                         double final = 0;
                         try { final = CalculateFinalGrade(withTask.Where(x => !string.IsNullOrEmpty(x.Type)).Select(x => (x.Type, x.Grade)), c.GradingPolicy); } catch { final = 0; }
-                        gridStudents.Rows.Add(g.Key.Name, g.Key.Group, $"{done}/{total}", ((int)Math.Round(final)).ToString());
+                        int idx = gridStudents.Rows.Add(g.Key.Name, g.Key.Group, $"{done}/{total}", ((int)Math.Round(final)).ToString());
+                        string key = g.Key.Name + "|" + g.Key.Group;
+                        gridStudents.Rows[idx].Tag = key;
+                        if (!string.IsNullOrEmpty(selectedStudentKey) && key == selectedStudentKey)
+                            rowToSelect = idx;
+                    }
+                    if (rowToSelect.HasValue)
+                    {
+                        gridStudents.CurrentCell = gridStudents.Rows[rowToSelect.Value].Cells[0];
+                        gridStudents.Rows[rowToSelect.Value].Selected = true;
+                    }
+                    else
+                    {
+                        selectedStudentKey = null;
+                        ResetGridSelection(gridStudents);
                     }
                 }
                 catch { }
+                finally
+                {
+                    isRefreshingStudents = false;
+                    btnViewStudent.Enabled = gridStudents.SelectedRows.Count > 0;
+                }
             }
 
 
@@ -4810,8 +4992,22 @@ namespace Интерпретатор_машины_Тьюринга
             cbTaskStatus.SelectedIndexChanged += (s, e) => RefreshTasksGrid();
             txtStudSearch.TextChanged += (s, e) => RefreshStudentsGrid();
             cbStudGroup.SelectedIndexChanged += (s, e) => RefreshStudentsGrid();
-            gridTasks.SelectionChanged += (s, e) => { bool sel = gridTasks.CurrentCell != null; btnEditTask.Enabled = btnDeleteTask.Enabled = btnCheckTask.Enabled = sel; };
-            gridStudents.SelectionChanged += (s, e) => { btnViewStudent.Enabled = gridStudents.CurrentCell != null; };
+            gridTasks.SelectionChanged += (s, e) =>
+            {
+                if (isRefreshingTasks) return;
+                if (gridTasks.SelectedRows.Count > 0 && gridTasks.SelectedRows[0].Tag is int tid)
+                    selectedTaskId = tid;
+                else
+                    selectedTaskId = null;
+                bool any = gridTasks.SelectedRows.Count > 0;
+                btnEditTask.Enabled = btnDeleteTask.Enabled = btnCheckTask.Enabled = any;
+            };
+            gridStudents.SelectionChanged += (s, e) =>
+            {
+                if (isRefreshingStudents) return;
+                selectedStudentKey = gridStudents.SelectedRows.Count > 0 ? (gridStudents.SelectedRows[0].Tag as string) : null;
+                btnViewStudent.Enabled = gridStudents.SelectedRows.Count > 0;
+            };
 
             // Создание задания. После закрытия модального окна редактора:
             //   1) Локально дёргаем DataRefreshBus.Raise — это мгновенно перезагружает
@@ -5135,10 +5331,14 @@ namespace Интерпретатор_машины_Тьюринга
             List<Assignment> myAssignments = new List<Assignment>();
             List<StudentTaskRecord> myPerf = new List<StudentTaskRecord>();
 
-            // Флаг подавления SelectionChanged во время перестройки грида курсов
+            // Флаги подавления SelectionChanged во время программной перестройки гридов.
+            // Поиск/фильтр НЕ сбрасывает выбор: если элемент остаётся в выборке — он
+            // остаётся выделенным; если уходит — выделение снимается. Авто-выбор
+            // первой строки при открытии или при наборе в поиске запрещён.
             bool isRefreshingCourses = false;
-            // Id текущего выбранного курса (null = ничего не выбрано)
+            bool isRefreshingTasks = false;
             int? selectedCourseId = null;
+            int? selectedTaskId = null;
 
             // НОВАЯ функция определения статуса работы студента.
             string GetStudentStatus(Assignment a)
@@ -5154,6 +5354,14 @@ namespace Интерпретатор_машины_Тьюринга
             Course FindCourse(int? cid) => cid.HasValue ? myCourses.FirstOrDefault(x => x.Id == cid.Value) : null;
             string GetCourseName() { var c = FindCourse(GetSelectedCourseId()); return c?.Name ?? ""; }
 
+            // Программно снимает выделение и фокус ячейки.
+            void ResetGridSelection(DataGridView g)
+            {
+                if (g == null) return;
+                try { g.CurrentCell = null; } catch { }
+                g.ClearSelection();
+            }
+
             // Перестраивает список курсов с учётом поиска.
             // Восстанавливает ранее выбранный курс, если он попадает в результаты поиска.
             // Если выбранный курс не найден — снимает выделение и обновляет правую панель.
@@ -5162,7 +5370,6 @@ namespace Интерпретатор_машины_Тьюринга
                 isRefreshingCourses = true;
                 try
                 {
-                    gridCourses.ClearSelection();
                     gridCourses.Rows.Clear();
                     string s = txtSearch.Text.Trim().ToLower();
                     int? rowToSelect = null;
@@ -5175,16 +5382,14 @@ namespace Интерпретатор_машины_Тьюринга
                     }
                     if (rowToSelect.HasValue)
                     {
-                        gridCourses.Rows[rowToSelect.Value].Selected = true;
                         gridCourses.CurrentCell = gridCourses.Rows[rowToSelect.Value].Cells[0];
+                        gridCourses.Rows[rowToSelect.Value].Selected = true;
                     }
                     else
                     {
                         // Выбранный курс не входит в результаты поиска — сбрасываем выбор
                         selectedCourseId = null;
-                        gridCourses.ClearSelection();
-                        if (gridCourses.Rows.Count > 0)
-                            gridCourses.CurrentCell = null;
+                        ResetGridSelection(gridCourses);
                     }
                 }
                 finally
@@ -5196,6 +5401,7 @@ namespace Интерпретатор_машины_Тьюринга
 
             void RefreshTasksAndStats()
             {
+                isRefreshingTasks = true;
                 try
                 {
                     gridTasks.Rows.Clear();
@@ -5208,6 +5414,7 @@ namespace Интерпретатор_машины_Тьюринга
                         lblFinal.Text = "Итог: —";
                         btnViewFormula.Enabled = false;
                         btnOpenTask.Enabled = false;
+                        ResetGridSelection(gridTasks);
                         return;
                     }
                     btnViewFormula.Enabled = true;
@@ -5226,12 +5433,13 @@ namespace Интерпретатор_машины_Тьюринга
                     lblAvg.Text = $"Сформированная оценка: {avg:0.0}";
                     lblFinal.Text = $"Итог: {final:0.0}";
 
-                    if (myAssignments == null) return;
+                    if (myAssignments == null) { ResetGridSelection(gridTasks); return; }
                     string search = txtTaskSearch.Text.Trim().ToLower();
                     string filterType = cbType.SelectedItem?.ToString() ?? "Все";
                     string filterStatus = cbStatus.SelectedItem?.ToString() ?? "Все";
                     string filterGrade = cbGrade.SelectedItem?.ToString() ?? "Все";
 
+                    int? rowToSelect = null;
                     foreach (var a in myAssignments
                                 .Where(x => x != null && x.CourseName == courseName)
                                 .OrderBy(x => x.Deadline))
@@ -5255,9 +5463,26 @@ namespace Интерпретатор_машины_Тьюринга
                             st,
                             gradeValue?.ToString() ?? "—");
                         gridTasks.Rows[idx].Tag = a.Id;
+                        if (selectedTaskId.HasValue && a.Id == selectedTaskId.Value)
+                            rowToSelect = idx;
+                    }
+                    if (rowToSelect.HasValue)
+                    {
+                        gridTasks.CurrentCell = gridTasks.Rows[rowToSelect.Value].Cells[0];
+                        gridTasks.Rows[rowToSelect.Value].Selected = true;
+                    }
+                    else
+                    {
+                        selectedTaskId = null;
+                        ResetGridSelection(gridTasks);
                     }
                 }
                 catch { }
+                finally
+                {
+                    isRefreshingTasks = false;
+                    btnOpenTask.Enabled = gridTasks.SelectedRows.Count > 0 || gridTasks.CurrentCell != null;
+                }
             }
 
             void OnCourseChanged()
@@ -5320,7 +5545,17 @@ namespace Интерпретатор_машины_Тьюринга
             cbStatus.SelectedIndexChanged += (s, e) => RefreshTasksAndStats();
             cbGrade.SelectedIndexChanged += (s, e) => RefreshTasksAndStats();
 
-            gridTasks.SelectionChanged += (s, e) => { btnOpenTask.Enabled = gridTasks.CurrentCell != null; };
+            gridTasks.SelectionChanged += (s, e) =>
+            {
+                if (isRefreshingTasks) return;
+                if (gridTasks.SelectedRows.Count > 0 && gridTasks.SelectedRows[0].Tag is int tid)
+                    selectedTaskId = tid;
+                else if (gridTasks.CurrentCell != null && gridTasks.Rows[gridTasks.CurrentCell.RowIndex].Tag is int tid2)
+                    selectedTaskId = tid2;
+                else
+                    selectedTaskId = null;
+                btnOpenTask.Enabled = gridTasks.CurrentCell != null;
+            };
 
             Action openTask = async () =>
             {
