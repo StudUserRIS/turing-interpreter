@@ -1676,8 +1676,19 @@ namespace Интерпретатор_машины_Тьюринга
             void ResetGridSelection(DataGridView g)
             {
                 if (g == null) return;
-                try { g.CurrentCell = null; } catch { }
                 g.ClearSelection();
+                g.BeginInvoke(new Action(() =>
+                {
+                    try { g.CurrentCell = null; } catch { }
+                    g.ClearSelection();
+                }));
+            }
+
+            void SelectGridRow(DataGridView g, int rowIdx)
+            {
+                g.ClearSelection();
+                g.Rows[rowIdx].Selected = true;
+                try { g.CurrentCell = g.Rows[rowIdx].Cells[0]; } catch { }
             }
 
             void RefreshStudentsGrid()
@@ -1716,14 +1727,9 @@ namespace Интерпретатор_машины_Тьюринга
                     }
 
                     if (rowToSelect.HasValue)
-                    {
-                        gridStudents.CurrentCell = gridStudents.Rows[rowToSelect.Value].Cells[0];
-                        gridStudents.Rows[rowToSelect.Value].Selected = true;
-                    }
+                        SelectGridRow(gridStudents, rowToSelect.Value);
                     else
-                    {
                         ResetGridSelection(gridStudents);
-                    }
                 }
                 finally { isRefreshingStudents = false; }
                 UpdateStudentButtons();
@@ -1753,14 +1759,9 @@ namespace Интерпретатор_машины_Тьюринга
                             rowToSelect = idx;
                     }
                     if (rowToSelect.HasValue)
-                    {
-                        gridGroups.CurrentCell = gridGroups.Rows[rowToSelect.Value].Cells[0];
-                        gridGroups.Rows[rowToSelect.Value].Selected = true;
-                    }
+                        SelectGridRow(gridGroups, rowToSelect.Value);
                     else
-                    {
                         ResetGridSelection(gridGroups);
-                    }
                 }
                 finally { isRefreshingGroups = false; }
                 UpdateGroupButtons();
@@ -1816,14 +1817,9 @@ namespace Интерпретатор_машины_Тьюринга
                             rowToSelect = idx;
                     }
                     if (rowToSelect.HasValue)
-                    {
-                        gridCourses.CurrentCell = gridCourses.Rows[rowToSelect.Value].Cells[0];
-                        gridCourses.Rows[rowToSelect.Value].Selected = true;
-                    }
+                        SelectGridRow(gridCourses, rowToSelect.Value);
                     else
-                    {
                         ResetGridSelection(gridCourses);
-                    }
                 }
                 finally { isRefreshingCoursesAdm = false; }
                 UpdateCourseButtons();
@@ -1854,14 +1850,9 @@ namespace Интерпретатор_машины_Тьюринга
                             rowToSelect = idx;
                     }
                     if (rowToSelect.HasValue)
-                    {
-                        gridTeachers.CurrentCell = gridTeachers.Rows[rowToSelect.Value].Cells[0];
-                        gridTeachers.Rows[rowToSelect.Value].Selected = true;
-                    }
+                        SelectGridRow(gridTeachers, rowToSelect.Value);
                     else
-                    {
                         ResetGridSelection(gridTeachers);
-                    }
                 }
                 finally { isRefreshingTeachers = false; }
                 UpdateTeacherButtons();
@@ -4641,7 +4632,7 @@ namespace Интерпретатор_машины_Тьюринга
                 AllowUserToAddRows = false,
                 ReadOnly = true,
                 RowHeadersVisible = false,
-                SelectionMode = DataGridViewSelectionMode.CellSelect,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = false,
                 BackgroundColor = Color.White,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
@@ -4694,7 +4685,7 @@ namespace Интерпретатор_машины_Тьюринга
                 AllowUserToAddRows = false,
                 ReadOnly = true,
                 RowHeadersVisible = false,
-                SelectionMode = DataGridViewSelectionMode.CellSelect,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = false,
                 BackgroundColor = Color.White,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
@@ -4734,7 +4725,7 @@ namespace Интерпретатор_машины_Тьюринга
                 AllowUserToAddRows = false,
                 ReadOnly = true,
                 RowHeadersVisible = false,
-                SelectionMode = DataGridViewSelectionMode.CellSelect,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = false,
                 BackgroundColor = Color.White,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
@@ -4776,17 +4767,31 @@ namespace Интерпретатор_машины_Тьюринга
             int? GetSelectedCourseId() => selectedCourseId;
             Course FindCourse(int? cid) => cid.HasValue ? allCourses.FirstOrDefault(x => x.Id == cid.Value) : null;
 
-            // Программно снимает выделение и фокус ячейки.
+            // Программно снимает выделение и убирает синюю рамку фокуса.
+            // Для FullRowSelect: ClearSelection + CurrentCell=null через BeginInvoke,
+            // потому что после Rows.Add WinForms восстанавливает CurrentCell в очереди сообщений.
             void ResetGridSelection(DataGridView g)
             {
                 if (g == null) return;
-                try { g.CurrentCell = null; } catch { }
                 g.ClearSelection();
+                g.BeginInvoke(new Action(() =>
+                {
+                    try { g.CurrentCell = null; } catch { }
+                    g.ClearSelection();
+                }));
+            }
+
+            // Выставляет выделение на конкретную строку (без триггера SelectionChanged — флаг уже установлен снаружи).
+            void SelectGridRow(DataGridView g, int rowIdx)
+            {
+                g.ClearSelection();
+                g.Rows[rowIdx].Selected = true;
+                try { g.CurrentCell = g.Rows[rowIdx].Cells[0]; } catch { }
             }
 
             // Перестраивает список курсов с учётом поиска.
-            // Восстанавливает ранее выбранный курс, если он попадает в результаты поиска.
-            // Если выбранный курс не найден — снимает выделение и обновляет правую панель.
+            // Восстанавливает ранее выбранный курс, если он попадает в результаты.
+            // Если нет — снимает выделение (не авто-выделяет первую строку).
             void RefreshCoursesGrid()
             {
                 isRefreshingCourses = true;
@@ -4804,13 +4809,9 @@ namespace Интерпретатор_машины_Тьюринга
                             rowToSelect = idx;
                     }
                     if (rowToSelect.HasValue)
-                    {
-                        gridCourses.CurrentCell = gridCourses.Rows[rowToSelect.Value].Cells[0];
-                        gridCourses.Rows[rowToSelect.Value].Selected = true;
-                    }
+                        SelectGridRow(gridCourses, rowToSelect.Value);
                     else
                     {
-                        // Выбранный курс не входит в результаты поиска — сбрасываем выбор
                         selectedCourseId = null;
                         ResetGridSelection(gridCourses);
                     }
@@ -4850,10 +4851,7 @@ namespace Интерпретатор_машины_Тьюринга
                             rowToSelect = idx;
                     }
                     if (rowToSelect.HasValue)
-                    {
-                        gridTasks.CurrentCell = gridTasks.Rows[rowToSelect.Value].Cells[0];
-                        gridTasks.Rows[rowToSelect.Value].Selected = true;
-                    }
+                        SelectGridRow(gridTasks, rowToSelect.Value);
                     else
                     {
                         selectedTaskId = null;
@@ -4899,10 +4897,7 @@ namespace Интерпретатор_машины_Тьюринга
                             rowToSelect = idx;
                     }
                     if (rowToSelect.HasValue)
-                    {
-                        gridStudents.CurrentCell = gridStudents.Rows[rowToSelect.Value].Cells[0];
-                        gridStudents.Rows[rowToSelect.Value].Selected = true;
-                    }
+                        SelectGridRow(gridStudents, rowToSelect.Value);
                     else
                     {
                         selectedStudentKey = null;
@@ -4964,8 +4959,17 @@ namespace Интерпретатор_машины_Тьюринга
                 {
                     lblCourseTitle.Text = "Выберите курс слева";
                     btnGradingFormula.Enabled = false;
-                    gridTasks.Rows.Clear(); gridStudents.Rows.Clear();
+                    selectedTaskId = null;
+                    selectedStudentKey = null;
+                    gridTasks.Rows.Clear();
+                    gridStudents.Rows.Clear();
+                    ResetGridSelection(gridTasks);
+                    ResetGridSelection(gridStudents);
                     btnCreateTask.Enabled = false;
+                    btnEditTask.Enabled = false;
+                    btnDeleteTask.Enabled = false;
+                    btnCheckTask.Enabled = false;
+                    btnViewStudent.Enabled = false;
                     return;
                 }
                 lblCourseTitle.Text = $"📘 {c.Name}" + (c.Archived == 1 ? " [Архив]" : "");
@@ -4978,10 +4982,8 @@ namespace Интерпретатор_машины_Тьюринга
             gridCourses.SelectionChanged += (s, e) =>
             {
                 if (isRefreshingCourses || isLoading) return;
-                // Обновляем selectedCourseId на основе реального клика пользователя
-                if (gridCourses.CurrentCell != null && gridCourses.CurrentCell.RowIndex >= 0
-                    && gridCourses.CurrentCell.RowIndex < gridCourses.Rows.Count)
-                    selectedCourseId = (int?)gridCourses.Rows[gridCourses.CurrentCell.RowIndex].Tag;
+                if (gridCourses.SelectedRows.Count > 0)
+                    selectedCourseId = gridCourses.SelectedRows[0].Tag as int?;
                 else
                     selectedCourseId = null;
                 OnCourseChanged();
@@ -5042,8 +5044,8 @@ namespace Интерпретатор_машины_Тьюринга
             // что гарантирует обновление без гонки isLoading.
             btnEditTask.Click += async (s, e) =>
             {
-                if (gridTasks.CurrentCell == null) return;
-                int taskId = (int)gridTasks.Rows[gridTasks.CurrentCell.RowIndex].Tag;
+                if (gridTasks.SelectedRows.Count == 0) return;
+                int taskId = (int)gridTasks.SelectedRows[0].Tag;
                 var a = allAssignments.FirstOrDefault(x => x.Id == taskId);
                 var c = FindCourse(GetSelectedCourseId());
                 if (a == null || c == null) return;
@@ -5072,8 +5074,8 @@ namespace Интерпретатор_машины_Тьюринга
             // но добавляем явный LoadAllData в успешной ветке для гарантии локального отклика.
             btnDeleteTask.Click += async (s, e) =>
             {
-                if (gridTasks.CurrentCell == null) return;
-                int taskId = (int)gridTasks.Rows[gridTasks.CurrentCell.RowIndex].Tag;
+                if (gridTasks.SelectedRows.Count == 0) return;
+                int taskId = (int)gridTasks.SelectedRows[0].Tag;
                 if (ShowConfirmDialog("Удалить задание?\nВсе сданные работы будут безвозвратно удалены.", "Подтверждение"))
                 {
                     if (await ApiClient.DeleteAssignmentAsync(taskId))
@@ -5091,8 +5093,8 @@ namespace Интерпретатор_машины_Тьюринга
             // "Проверить работы" — после возврата из дочернего окна гарантируем обновление.
             btnCheckTask.Click += async (s, e) =>
             {
-                if (gridTasks.CurrentCell == null) return;
-                int taskId = (int)gridTasks.Rows[gridTasks.CurrentCell.RowIndex].Tag;
+                if (gridTasks.SelectedRows.Count == 0) return;
+                int taskId = (int)gridTasks.SelectedRows[0].Tag;
                 await ShowSubmissionsCheckWindow(taskId, form);
                 DataRefreshBus.Raise("Submission", "Updated", taskId);
                 await LoadAllData();
@@ -5105,8 +5107,8 @@ namespace Интерпретатор_машины_Тьюринга
 
             btnViewStudent.Click += (s, e) =>
             {
-                if (gridStudents.CurrentCell == null) return;
-                string studentName = gridStudents.Rows[gridStudents.CurrentCell.RowIndex].Cells[0].Value?.ToString();
+                if (gridStudents.SelectedRows.Count == 0) return;
+                string studentName = gridStudents.SelectedRows[0].Cells[0].Value?.ToString();
                 var c = FindCourse(GetSelectedCourseId());
                 if (c == null || string.IsNullOrEmpty(studentName)) return;
                 ShowStudentGradesWindow(studentName, c.Name, form);
@@ -5234,7 +5236,7 @@ namespace Интерпретатор_машины_Тьюринга
                 AllowUserToAddRows = false,
                 ReadOnly = true,
                 RowHeadersVisible = false,
-                SelectionMode = DataGridViewSelectionMode.CellSelect,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = false,
                 BackgroundColor = Color.White,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
@@ -5298,7 +5300,7 @@ namespace Интерпретатор_машины_Тьюринга
                 AllowUserToAddRows = false,
                 ReadOnly = true,
                 RowHeadersVisible = false,
-                SelectionMode = DataGridViewSelectionMode.CellSelect,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = false,
                 BackgroundColor = Color.White,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
@@ -5354,17 +5356,29 @@ namespace Интерпретатор_машины_Тьюринга
             Course FindCourse(int? cid) => cid.HasValue ? myCourses.FirstOrDefault(x => x.Id == cid.Value) : null;
             string GetCourseName() { var c = FindCourse(GetSelectedCourseId()); return c?.Name ?? ""; }
 
-            // Программно снимает выделение и фокус ячейки.
+            // Программно снимает выделение и убирает синюю рамку фокуса.
             void ResetGridSelection(DataGridView g)
             {
                 if (g == null) return;
-                try { g.CurrentCell = null; } catch { }
                 g.ClearSelection();
+                g.BeginInvoke(new Action(() =>
+                {
+                    try { g.CurrentCell = null; } catch { }
+                    g.ClearSelection();
+                }));
+            }
+
+            // Выставляет выделение на конкретную строку.
+            void SelectGridRow(DataGridView g, int rowIdx)
+            {
+                g.ClearSelection();
+                g.Rows[rowIdx].Selected = true;
+                try { g.CurrentCell = g.Rows[rowIdx].Cells[0]; } catch { }
             }
 
             // Перестраивает список курсов с учётом поиска.
-            // Восстанавливает ранее выбранный курс, если он попадает в результаты поиска.
-            // Если выбранный курс не найден — снимает выделение и обновляет правую панель.
+            // Восстанавливает ранее выбранный курс, если он попадает в результаты.
+            // Если нет — снимает выделение (не авто-выделяет первую строку).
             void RefreshCoursesGrid()
             {
                 isRefreshingCourses = true;
@@ -5381,13 +5395,9 @@ namespace Интерпретатор_машины_Тьюринга
                             rowToSelect = idx;
                     }
                     if (rowToSelect.HasValue)
-                    {
-                        gridCourses.CurrentCell = gridCourses.Rows[rowToSelect.Value].Cells[0];
-                        gridCourses.Rows[rowToSelect.Value].Selected = true;
-                    }
+                        SelectGridRow(gridCourses, rowToSelect.Value);
                     else
                     {
-                        // Выбранный курс не входит в результаты поиска — сбрасываем выбор
                         selectedCourseId = null;
                         ResetGridSelection(gridCourses);
                     }
@@ -5467,10 +5477,7 @@ namespace Интерпретатор_машины_Тьюринга
                             rowToSelect = idx;
                     }
                     if (rowToSelect.HasValue)
-                    {
-                        gridTasks.CurrentCell = gridTasks.Rows[rowToSelect.Value].Cells[0];
-                        gridTasks.Rows[rowToSelect.Value].Selected = true;
-                    }
+                        SelectGridRow(gridTasks, rowToSelect.Value);
                     else
                     {
                         selectedTaskId = null;
@@ -5481,7 +5488,7 @@ namespace Интерпретатор_машины_Тьюринга
                 finally
                 {
                     isRefreshingTasks = false;
-                    btnOpenTask.Enabled = gridTasks.SelectedRows.Count > 0 || gridTasks.CurrentCell != null;
+                    btnOpenTask.Enabled = gridTasks.SelectedRows.Count > 0;
                 }
             }
 
@@ -5491,7 +5498,9 @@ namespace Интерпретатор_машины_Тьюринга
                 if (c == null)
                 {
                     lblCourseTitle.Text = "Выберите курс слева";
+                    selectedTaskId = null;
                     gridTasks.Rows.Clear();
+                    ResetGridSelection(gridTasks);
                     btnOpenTask.Enabled = false;
                     btnViewFormula.Enabled = false;
                     lblTotal.Text = "Всего заданий: —";
@@ -5531,10 +5540,8 @@ namespace Интерпретатор_машины_Тьюринга
             gridCourses.SelectionChanged += (s, e) =>
             {
                 if (isRefreshingCourses || isLoading) return;
-                // Обновляем selectedCourseId на основе реального клика пользователя
-                if (gridCourses.CurrentCell != null && gridCourses.CurrentCell.RowIndex >= 0
-                    && gridCourses.CurrentCell.RowIndex < gridCourses.Rows.Count)
-                    selectedCourseId = (int?)gridCourses.Rows[gridCourses.CurrentCell.RowIndex].Tag;
+                if (gridCourses.SelectedRows.Count > 0)
+                    selectedCourseId = gridCourses.SelectedRows[0].Tag as int?;
                 else
                     selectedCourseId = null;
                 OnCourseChanged();
@@ -5550,18 +5557,16 @@ namespace Интерпретатор_машины_Тьюринга
                 if (isRefreshingTasks) return;
                 if (gridTasks.SelectedRows.Count > 0 && gridTasks.SelectedRows[0].Tag is int tid)
                     selectedTaskId = tid;
-                else if (gridTasks.CurrentCell != null && gridTasks.Rows[gridTasks.CurrentCell.RowIndex].Tag is int tid2)
-                    selectedTaskId = tid2;
                 else
                     selectedTaskId = null;
-                btnOpenTask.Enabled = gridTasks.CurrentCell != null;
+                btnOpenTask.Enabled = gridTasks.SelectedRows.Count > 0;
             };
 
             Action openTask = async () =>
             {
-                if (gridTasks.CurrentCell == null) return;
-                if (gridTasks.Rows[gridTasks.CurrentCell.RowIndex].Tag == null) return;
-                int taskId = (int)gridTasks.Rows[gridTasks.CurrentCell.RowIndex].Tag;
+                if (gridTasks.SelectedRows.Count == 0) return;
+                if (gridTasks.SelectedRows[0].Tag == null) return;
+                int taskId = (int)gridTasks.SelectedRows[0].Tag;
                 var a = myAssignments.FirstOrDefault(x => x.Id == taskId);
                 if (a == null)
                 {

@@ -37,7 +37,8 @@
       "Bash(PowerShell -Command \"Get-ChildItem 'Интерпретатор_машины_Тьюринга\\\\Controls' -Recurse -File\")",
       "Bash(MSBuild.exe /nologo /v:m /p:Configuration=Debug)",
       "Bash(/c/Windows/Microsoft.NET/Framework/v4.0.30319/MSBuild.exe /nologo /v:m /p:Configuration=Debug)",
-      "PowerShell($msb = 'C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe'; & $msb 'C:\\\\Users\\\\Иван\\\\Desktop\\\\Курсовой проект\\\\Интерпретатор\\\\Интерпретатор_машины_Тьюринга\\\\Интерпретатор_машины_Тьюринга.csproj' /nologo /v:m /p:Configuration=Debug /t:Build 2>&1 | Select-Object -Last 80)"
+      "PowerShell($msb = 'C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe'; & $msb 'C:\\\\Users\\\\Иван\\\\Desktop\\\\Курсовой проект\\\\Интерпретатор\\\\Интерпретатор_машины_Тьюринга\\\\Интерпретатор_машины_Тьюринга.csproj' /nologo /v:m /p:Configuration=Debug /t:Build 2>&1 | Select-Object -Last 80)",
+      "PowerShell($msb = 'C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe'; & $msb 'C:\\\\Users\\\\Иван\\\\Desktop\\\\Курсовой проект\\\\Интерпретатор\\\\Интерпретатор_машины_Тьюринга\\\\Интерпретатор_машины_Тьюринга.csproj' /nologo /v:m /p:Configuration=Debug /t:Build 2>&1 | Select-Object -Last 40)"
     ]
   }
 }
