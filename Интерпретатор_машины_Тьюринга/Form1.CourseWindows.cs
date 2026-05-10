@@ -487,8 +487,11 @@ namespace Интерпретатор_машины_Тьюринга
             //   • Если работа в "Не оценено" и дедлайн не вышел и не на проверке — кнопка "Отозвать работу".
             //   • Если работа в "Не сдано" или статуса нет, и дедлайн не вышел — кнопка "Приступить".
             //   • Если дедлайн истёк — только просмотр (если что-то загружено).
-            //   • Если МТ изменена преподавателем/администратором (IsOutdated=1) и работа ещё не оценена,
-            //     дедлайн не вышел и работа не на проверке — кнопка "Начать заново" (POST /reset).
+            //
+            // ВАЖНО (UX): набор кнопок при наличии и отсутствии изменений МТ ОДИНАКОВЫЙ.
+            // Окна отличаются только наличием информационной надписи «Начальная МТ у задания
+            // была изменена.» над кнопками. Никаких дополнительных кнопок при изменении МТ
+            // не появляется.
 
             bool hasSubmission = mySubmission != null && submissionStatus != "Не сдано";
             bool isGraded = submissionStatus == "Оценено";
@@ -500,28 +503,20 @@ namespace Интерпретатор_машины_Тьюринга
             // Read-only режим: если оценено или дедлайн истёк (студент уже не может редактировать).
             bool isReadOnly = isGraded || isDeadlinePassed || isBeingChecked || assignmentId <= 0;
 
-            // Кнопка «Начать заново» доступна, только если есть устаревший черновик,
-            // дедлайн не истёк, работа не оценена и не находится на проверке у преподавателя.
-            bool canResetOutdated = isOutdated
-                                    && mySubmission != null
-                                    && !isGraded
-                                    && !isDeadlinePassed
-                                    && !isBeingChecked
-                                    && assignmentId > 0;
-
-            int formClientWidth = canResetOutdated ? 460 : 420;
+            // Историческая компоновка двух кнопок: 185x30 в окне шириной 420px.
+            int formClientWidth = 420;
 
             if (isOutdated)
             {
+                // Только информационная надпись над кнопками. Никаких дополнительных
+                // элементов управления — окно отличается от обычного исключительно
+                // наличием этой подписи.
                 currentY += 5;
-                string warnText = canResetOutdated
-                    ? "⚠ Преподаватель обновил конфигурацию МТ задания. Ваше текущее решение основано на старой версии.\nВы можете сохранить старое решение в файл, а затем нажать «Начать заново» — и решить задание с актуальной МТ.\nЛибо нажмите «Продолжить работу», чтобы оставить решение как есть."
-                    : "⚠ Преподаватель обновил конфигурацию МТ задания. Ваше текущее решение основано на старой версии.";
                 int warnWidth = formClientWidth - leftX * 2;
-                int warnHeight = canResetOutdated ? 60 : 32;
+                int warnHeight = 20;
                 Label lblWarn = new Label
                 {
-                    Text = warnText,
+                    Text = "Начальная МТ у задания была изменена.",
                     Location = new Point(leftX, currentY),
                     Size = new Size(warnWidth, warnHeight),
                     Font = new Font("Segoe UI", 8, FontStyle.Bold),
@@ -533,47 +528,12 @@ namespace Интерпретатор_машины_Тьюринга
 
             currentY += 15;
 
-            // Компоновка кнопок: при трёх кнопках расширяем окно до 460px
-            // и делаем кнопки по 135px с отступами 10px между ними.
-            // 20 + 135 + 10 + 135 + 10 + 135 + 20 = 465 ≈ 460 (правый отступ 15 для выравнивания).
-            // При двух кнопках — историческая компоновка 185x30 в окне 420px.
-
-            int btnWidth, btnHeight = 30, btnGap = 10;
-            int btnLeftX, btnMiddleX, btnRightX;
-
-            if (canResetOutdated)
-            {
-                btnWidth = 135;
-                btnLeftX = 20;
-                btnMiddleX = btnLeftX + btnWidth + btnGap;          // 165
-                btnRightX = btnMiddleX + btnWidth + btnGap;          // 310
-                // Правый край: 310 + 135 = 445; формLeft = 460 → правый отступ 15.
-            }
-            else
-            {
-                btnWidth = 185;
-                btnLeftX = 20;
-                btnMiddleX = 0; // не используется
-                btnRightX = 215;
-            }
+            int btnWidth = 185, btnHeight = 30;
+            int btnLeftX = 20;
+            int btnRightX = 215;
 
             Button btnAction = new Button { Size = new Size(btnWidth, btnHeight), FlatStyle = FlatStyle.Standard, Font = fontRegular, Location = new Point(btnLeftX, currentY) };
             Button btnStart = new Button { Size = new Size(btnWidth, btnHeight), FlatStyle = FlatStyle.Standard, Font = fontRegular, Location = new Point(btnRightX, currentY) };
-            Button btnResetOutdated = null;
-
-            if (canResetOutdated)
-            {
-                btnResetOutdated = new Button
-                {
-                    Size = new Size(btnWidth, btnHeight),
-                    FlatStyle = FlatStyle.Standard,
-                    Font = fontRegular,
-                    Location = new Point(btnMiddleX, currentY),
-                    Text = "Начать заново",
-                    BackColor = Color.FromArgb(255, 220, 180),
-                    UseVisualStyleBackColor = false
-                };
-            }
 
             if (canRevoke)
             {
@@ -650,48 +610,7 @@ namespace Интерпретатор_машины_Тьюринга
                 EnterTaskExecutionMode(assignmentId, taskName, jsonToLoad, isReadOnly, canRevoke, parentForm, isOutdated);
             };
 
-            if (btnResetOutdated != null)
-            {
-                btnResetOutdated.Click += async (s, e) =>
-                {
-                    if (!canResetOutdated) return;
-                    if (!await EnsureAssignmentStillAvailable("начать заново")) return;
-
-                    if (!ShowConfirmDialog(
-                        "Начать выполнение задания заново?\n\n" +
-                        "Ваше текущее решение будет полностью удалено без возможности восстановления. " +
-                        "Если вы хотите сохранить старое решение — нажмите «Отмена», откройте задание через «Продолжить работу» и экспортируйте его в файл.\n\n" +
-                        "После сброса вы сможете решать задание с обновлённой МТ.",
-                        "Начать заново")) return;
-
-                    btnResetOutdated.Enabled = false;
-                    btnAction.Enabled = false;
-                    btnStart.Enabled = false;
-
-                    bool ok = await ApiClient.ResetSubmissionAsync(assignmentId);
-                    if (ok)
-                    {
-                        DataRefreshBus.Raise("Submission", "Updated", assignmentId);
-                        ShowSuccessDialog("Решение сброшено. Теперь вы можете приступить к заданию с актуальной МТ.");
-                        taskDetailForm.Close();
-                    }
-                    else
-                    {
-                        if (!taskDetailForm.IsDisposed)
-                        {
-                            btnResetOutdated.Enabled = canResetOutdated;
-                            btnAction.Enabled = canRevoke;
-                            btnStart.Enabled = true;
-                        }
-                    }
-                };
-
-                taskDetailForm.Controls.AddRange(new Control[] { btnAction, btnResetOutdated, btnStart });
-            }
-            else
-            {
-                taskDetailForm.Controls.AddRange(new Control[] { btnAction, btnStart });
-            }
+            taskDetailForm.Controls.AddRange(new Control[] { btnAction, btnStart });
             taskDetailForm.ClientSize = new Size(formClientWidth, currentY + 45);
 
             bool autoRefreshing = false;

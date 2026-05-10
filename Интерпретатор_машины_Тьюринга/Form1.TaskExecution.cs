@@ -27,8 +27,6 @@ namespace Интерпретатор_машины_Тьюринга
         private Button btnReturnTop;
         private Button btnRevokeTop;
         private Button btnResetSolutionTop;
-        private Button btnResetToNewMTTop;
-        private Panel panelMTOutdated;
 
         // ──────────────────────────────────────────────────────────
         // Резервирование / восстановление состояния интерпретатора
@@ -230,32 +228,8 @@ namespace Интерпретатор_машины_Тьюринга
             ApplyTextButtonStyle(btnResetSolutionTop);
             btnRevokeTop = new Button { Text = "Отозвать работу", Width = 140, Height = 25, Top = 0, Left = btnReturnTop.Left - 140, Anchor = AnchorStyles.Top | AnchorStyles.Right, Visible = false };
             ApplyTextButtonStyle(btnRevokeTop);
-            btnResetToNewMTTop = new Button { Text = "Начать с новой МТ", Width = 145, Height = 25, Top = 0, Left = btnResetSolutionTop.Left - 145, Anchor = AnchorStyles.Top | AnchorStyles.Right, Visible = false };
-            ApplyTextButtonStyle(btnResetToNewMTTop);
-            btnResetToNewMTTop.BackColor = System.Drawing.Color.FromArgb(255, 220, 180);
 
-            // Плашка «МТ обновлена» — полоса под кнопками
-            panelMTOutdated = new Panel
-            {
-                Height = 28,
-                Dock = DockStyle.Top,
-                BackColor = System.Drawing.Color.FromArgb(255, 243, 205),
-                Visible = false
-            };
-            var lblOutdated = new Label
-            {
-                Text = "⚠  Преподаватель обновил МТ задания. Ваше решение основано на старой версии. Сохраните его в файл, затем нажмите «Начать с новой МТ».",
-                Dock = DockStyle.Fill,
-                Font = new System.Drawing.Font("Segoe UI", 8.5f, System.Drawing.FontStyle.Bold),
-                ForeColor = System.Drawing.Color.FromArgb(133, 77, 0),
-                TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
-                Padding = new Padding(8, 0, 0, 0)
-            };
-            panelMTOutdated.Controls.Add(lblOutdated);
-            this.Controls.Add(panelMTOutdated);
-            panelMTOutdated.BringToFront();
-
-            void DisableExecutionButtons() { if (btnDraftTop != null) btnDraftTop.Enabled = false; if (btnSubmitTop != null) btnSubmitTop.Enabled = false; if (btnResetSolutionTop != null) btnResetSolutionTop.Enabled = false; if (btnRevokeTop != null) btnRevokeTop.Enabled = false; if (btnResetToNewMTTop != null) btnResetToNewMTTop.Enabled = false; }
+            void DisableExecutionButtons() { if (btnDraftTop != null) btnDraftTop.Enabled = false; if (btnSubmitTop != null) btnSubmitTop.Enabled = false; if (btnResetSolutionTop != null) btnResetSolutionTop.Enabled = false; if (btnRevokeTop != null) btnRevokeTop.Enabled = false; }
 
             async System.Threading.Tasks.Task<bool> EnsureExecutionStillAvailable()
             {
@@ -354,26 +328,6 @@ namespace Интерпретатор_машины_Тьюринга
                 ExitTaskExecutionMode();
             };
 
-            btnResetToNewMTTop.Click += async (s, e) =>
-            {
-                if (activeAssignmentId == null) return;
-                if (!ShowConfirmDialog(
-                    "Начать заново с новой версией МТ от преподавателя?\n\nВаше текущее решение будет удалено с сервера. Заранее экспортируйте его через «Файл → Экспорт программы».",
-                    "Сброс к новой версии МТ")) return;
-                btnResetToNewMTTop.Text = "Сброс..."; btnResetToNewMTTop.Enabled = false;
-                bool ok = await ApiClient.ResetSubmissionAsync(activeAssignmentId.Value);
-                if (ok)
-                {
-                    DataRefreshBus.Raise("Submission", "Deleted", activeAssignmentId.Value);
-                    ShowSuccessDialog("Решение сброшено. Окно выполнения закроется — откройте задание заново, чтобы начать с новой МТ.");
-                    ExitTaskExecutionMode();
-                }
-                else
-                {
-                    btnResetToNewMTTop.Text = "Начать с новой МТ"; btnResetToNewMTTop.Enabled = true;
-                }
-            };
-
             btnReturnTop.Click += (s, e) =>
             {
                 if (isTaskExecutionDirty && !isTaskReadOnlyMode && btnDraftTop.Enabled)
@@ -384,9 +338,9 @@ namespace Интерпретатор_машины_Тьюринга
             };
 
             this.Controls.Add(btnReturnTop); this.Controls.Add(btnSubmitTop); this.Controls.Add(btnDraftTop);
-            this.Controls.Add(btnResetSolutionTop); this.Controls.Add(btnRevokeTop); this.Controls.Add(btnResetToNewMTTop);
+            this.Controls.Add(btnResetSolutionTop); this.Controls.Add(btnRevokeTop);
             btnReturnTop.BringToFront(); btnSubmitTop.BringToFront(); btnDraftTop.BringToFront();
-            btnResetSolutionTop.BringToFront(); btnRevokeTop.BringToFront(); btnResetToNewMTTop.BringToFront();
+            btnResetSolutionTop.BringToFront(); btnRevokeTop.BringToFront();
         }
 
         // ──────────────────────────────────────────────────────────
@@ -403,19 +357,20 @@ namespace Интерпретатор_машины_Тьюринга
             if (btnUserMenu != null) btnUserMenu.Visible = false;
             if (btnExecution != null) btnExecution.Enabled = true;
 
-            bool showOutdatedControls = isOutdated && !isReadOnlyMode;
+            // Параметр isOutdated сохранён в сигнатуре для обратной совместимости с внешними вызовами,
+            // однако в окне выполнения задания никакие индикаторы об устаревании МТ больше не показываются
+            // (см. требование UX: окна с актуальной и обновлённой МТ должны различаться только в окне
+            // «Информация о задании» — наличием информационной надписи, без дополнительных кнопок).
+            _ = isOutdated;
 
             btnReturnTop.Visible            = true;
             btnDraftTop.Visible             = !isReadOnlyMode;
             btnSubmitTop.Visible            = !isReadOnlyMode;
             btnResetSolutionTop.Visible     = !isReadOnlyMode;
-            btnResetToNewMTTop.Visible      = showOutdatedControls;
-            panelMTOutdated.Visible         = showOutdatedControls;
             btnRevokeTop.Visible            = isReadOnlyMode && canRevoke;
             btnDraftTop.Enabled             = !isReadOnlyMode;
             btnSubmitTop.Enabled            = !isReadOnlyMode;
             btnResetSolutionTop.Enabled     = !isReadOnlyMode;
-            btnResetToNewMTTop.Enabled      = showOutdatedControls;
             btnRevokeTop.Enabled            = isReadOnlyMode && canRevoke;
 
             this.Text = isReadOnlyMode ? $"Просмотр работы — {taskName}" : $"Выполнение задания — {taskName}";
@@ -478,8 +433,6 @@ namespace Интерпретатор_машины_Тьюринга
             if (btnResetSolutionTop != null) btnResetSolutionTop.Visible = false;
             if (btnReturnTop != null)        btnReturnTop.Visible = false;
             if (btnRevokeTop != null)        btnRevokeTop.Visible = false;
-            if (btnResetToNewMTTop != null)  btnResetToNewMTTop.Visible = false;
-            if (panelMTOutdated != null)     panelMTOutdated.Visible = false;
 
             if (btnUserMenu != null) btnUserMenu.Visible = true;
             if (btnFile != null) btnFile.Enabled = true;
