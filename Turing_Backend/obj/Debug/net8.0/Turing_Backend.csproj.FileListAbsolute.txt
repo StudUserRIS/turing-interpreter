@@ -31,10 +31,11 @@ C:\Users\Иван\Desktop\Курсовой проект\Интерпретато
 C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\obj\Debug\net8.0\Turing_Backend.pdb
 C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\obj\Debug\net8.0\Turing_Backend.genruntimeconfig.cache
 C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\obj\Debug\net8.0\ref\Turing_Backend.dll
-C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\obj\Debug\net8.0\staticwebassets.upToDateCheck.txt
 C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\bin\Debug\net8.0\Microsoft.AspNetCore.Connections.Abstractions.dll
 C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\bin\Debug\net8.0\Microsoft.AspNetCore.SignalR.Common.dll
 C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\bin\Debug\net8.0\Microsoft.AspNetCore.SignalR.Protocols.NewtonsoftJson.dll
 C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\bin\Debug\net8.0\Microsoft.Extensions.Features.dll
 C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\bin\Debug\net8.0\Microsoft.Extensions.Options.dll
 C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\bin\Debug\net8.0\Newtonsoft.Json.dll
+C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\obj\Debug\net8.0\Turing_Backend.sourcelink.json
+C:\Users\Иван\Desktop\Курсовой проект\Интерпретатор\Turing_Backend\obj\Debug\net8.0\staticwebassets.upToDateCheck.txt

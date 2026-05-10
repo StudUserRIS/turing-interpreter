@@ -765,6 +765,14 @@ namespace Интерпретатор_машины_Тьюринга
             if (originalStatus == "Черновик" || originalStatus == "Скрыто")
                 originalStatus = "Архив";
 
+            // СНИМОК ИСХОДНОГО Description (JSON МТ), с которым открылось окно.
+            // Используется при сохранении для безопасной синхронизации state.Version с
+            // сервером: если в БД Description совпадает с этим снимком — значит МТ
+            // никто реально не менял, можно безопасно подхватить актуальный Version
+            // (бывает при SignalR-эхе или служебных обновлениях), не показывая
+            // пользователю ложное «было изменено другим пользователем».
+            string originalDescriptionAtOpen = state.ConfigurationJson ?? "";
+
             // НОВАЯ ЛОГИКА: МТ заблокирована если:
             //   • Это редактирование существующего задания, которое
             //   • Было хотя бы раз опубликовано (state.IsLocked = true)
@@ -860,6 +868,68 @@ namespace Интерпретатор_машины_Тьюринга
 
             pnlConfig.Controls.AddRange(new Control[] { lblConfigStatus, btnCreateTM, btnEditTM });
 
+            // Единая функция обновления UI-индикатора МТ по текущему hasConfig.
+            // Вызывается как при «Очистить МТ», так и при возврате из TM-builder
+            // (чтобы сразу отразить «✅ МТ настроена» без пересоздания окна).
+            void RefreshConfigPanel()
+            {
+                if (isMtLocked)
+                {
+                    lblConfigStatus.Text = "🔒 МТ заблокирована (задание уже было опубликовано)";
+                    lblConfigStatus.ForeColor = Color.Red;
+                    btnCreateTM.Enabled = false;
+                    btnEditTM.Enabled = false;
+                    return;
+                }
+                if (hasConfig)
+                {
+                    lblConfigStatus.Text = "✅ МТ настроена и сохранена";
+                    lblConfigStatus.ForeColor = Color.ForestGreen;
+                    btnCreateTM.Text = "Очистить МТ";
+                    btnCreateTM.BackColor = Color.FromArgb(255, 240, 240);
+                    btnEditTM.Enabled = true;
+                }
+                else
+                {
+                    lblConfigStatus.Text = "⚠️ МТ ещё не создана";
+                    lblConfigStatus.ForeColor = Color.DarkOrange;
+                    btnCreateTM.Text = "Создать МТ";
+                    btnCreateTM.BackColor = Color.FromArgb(240, 248, 255);
+                    btnEditTM.Enabled = false;
+                }
+            }
+
+            // Общий переход в TM-builder без закрытия текущего taskForm.
+            // 1. Сохраняем введённые поля в state, чтобы после возврата они всё были в полях.
+            // 2. Прячем taskForm и parentManageForm — их покажем обратно в callback'е.
+            // 3. Входим в EnterTeacherTMBuilderMode с onReturn-функцией, которая
+            //    восстановит видимость и обновит индикатор МТ в исходном окне.
+            void EnterTMBuilderForCurrentForm()
+            {
+                state.Title = txtTitle.Text;
+                state.Type = cbType.SelectedItem?.ToString() ?? "Домашняя работа";
+                state.Deadline = dtpDeadline.Value;
+                state.Status = cbStatus.SelectedItem?.ToString() ?? "Архив";
+
+                taskForm.Hide();
+                if (parentManageForm != null && !parentManageForm.IsDisposed) parentManageForm.Hide();
+
+                EnterTeacherTMBuilderMode(state, saved =>
+                {
+                    // Была ли реально сохранена новая МТ — пересчитываем hasConfig
+                    // из актуального state.ConfigurationJson, поскольку TM-builder мог
+                    // его обновить (при saved=true) или оставить прежним (saved=false).
+                    hasConfig = !string.IsNullOrWhiteSpace(state.ConfigurationJson)
+                                 && state.ConfigurationJson.Trim().StartsWith("{");
+                    if (taskForm.IsDisposed) return;
+                    RefreshConfigPanel();
+                    if (parentManageForm != null && !parentManageForm.IsDisposed) parentManageForm.Show();
+                    taskForm.Show();
+                    taskForm.Activate();
+                    taskForm.BringToFront();
+                });
+            }
+
             btnCreateTM.Click += (s, e) => {
                 if (hasConfig)
                 {
@@ -867,11 +937,7 @@ namespace Интерпретатор_машины_Тьюринга
                     {
                         state.ConfigurationJson = "";
                         hasConfig = false;
-                        lblConfigStatus.Text = "⚠️ МТ ещё не создана";
-                        lblConfigStatus.ForeColor = Color.DarkOrange;
-                        btnCreateTM.Text = "Создать МТ";
-                        btnCreateTM.BackColor = Color.FromArgb(240, 248, 255);
-                        btnEditTM.Enabled = false;
+                        RefreshConfigPanel();
                     }
                 }
                 else
@@ -883,23 +949,12 @@ namespace Интерпретатор_машины_Тьюринга
                         txtTitle.Focus();
                         return;
                     }
-
-                    state.Title = txtTitle.Text;
-                    state.Type = cbType.SelectedItem?.ToString() ?? "Домашняя работа";
-                    state.Deadline = dtpDeadline.Value;
-                    state.Status = cbStatus.SelectedItem?.ToString() ?? "Архив";
-                    taskForm.Close();
-                    EnterTeacherTMBuilderMode(courseId, courseName, state, parentManageForm);
+                    EnterTMBuilderForCurrentForm();
                 }
             };
 
             btnEditTM.Click += (s, e) => {
-                state.Title = txtTitle.Text;
-                state.Type = cbType.SelectedItem?.ToString() ?? "Домашняя работа";
-                state.Deadline = dtpDeadline.Value;
-                state.Status = cbStatus.SelectedItem?.ToString() ?? "Архив";
-                taskForm.Close();
-                EnterTeacherTMBuilderMode(courseId, courseName, state, parentManageForm);
+                EnterTMBuilderForCurrentForm();
             };
 
             Label lblHintLocked = null;
@@ -999,6 +1054,34 @@ namespace Интерпретатор_машины_Тьюринга
                 ApiClient.AdminOpResult res;
                 if (isEdit)
                 {
+                    // БЕЗОПАСНАЯ СИНХРОНИЗАЦИЯ Version: перед PUT запрашиваем
+                    // актуальное состояние задания с сервера. Если оказывается, что
+                    // Version в БД увеличился, НО Description остался равным тому, что
+                    // было при открытии окна (реально МТ никто не менял) — тихо
+                    // подхватываем актуальный Version. Это устраняет ложный
+                    // VersionConflict от SignalR-эха/служебных обновлений, сохраняя при
+                    // этом защиту от реальной конкуренции пользователей.
+                    int versionToSend = state.Version;
+                    try
+                    {
+                        var fresh = await ApiClient.GetAssignmentStateAsync(state.TaskId.Value);
+                        if (fresh != null && !fresh.IsDeleted)
+                        {
+                            string freshDesc = fresh.Description ?? "";
+                            // Сравниваем БД-версию Description именно с оригиналамом на момент
+                            // открытия окна (originalDescriptionAtOpen). Если они совпадают —
+                            // другой пользователь МТ не редактировал: подхватываем актуальный
+                            // Version и продолжаем. Если различаются — это реальный конфликт,
+                            // сервер вернёт VersionConflict и UI покажет корректное предупреждение.
+                            if (string.Equals(freshDesc, originalDescriptionAtOpen, StringComparison.Ordinal))
+                            {
+                                versionToSend = fresh.Version;
+                                state.Version = fresh.Version;
+                            }
+                        }
+                    }
+                    catch { /* сетевые/временные ошибки — PUT всё равно отработает корректно */ }
+
                     res = await ApiClient.UpdateAssignmentAdminAsync(
                         state.TaskId.Value,
                         trimmedTitle,
@@ -1006,7 +1089,7 @@ namespace Интерпретатор_машины_Тьюринга
                         dtpDeadline.Value,
                         newStatus,
                         state.ConfigurationJson,
-                        state.Version);
+                        versionToSend);
                 }
                 else
                 {

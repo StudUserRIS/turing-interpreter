@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Turing_Backend")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5bb2a8aaf6221e02651b382897b60ba783a5ca18")]
 [assembly: System.Reflection.AssemblyProductAttribute("Turing_Backend")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Turing_Backend")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

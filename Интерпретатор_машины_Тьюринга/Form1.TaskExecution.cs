@@ -89,12 +89,39 @@ namespace Интерпретатор_машины_Тьюринга
         }
 
         // ──────────────────────────────────────────────────────────
-        // Конструктор МТ для преподавателя
+        // Конструктор МТ для преподавателя.
+        //
+        // ВАЖНО ПО АРХИТЕКТУРЕ (исправление бага «не сохраняется МТ»):
+        // Раньше при нажатии «Изменить МТ» / «Создать МТ» в окне редактирования
+        // задания это окно ЗАКРЫВАЛОСЬ (taskForm.Close), потом вызывался
+        // EnterTeacherTMBuilderMode, а при возврате открывалось НОВОЕ окно
+        // редактирования через ShowTaskEditorWindow. Это приводило к нескольким
+        // серьёзным проблемам:
+        //   1) Между закрытием первого окна и открытием второго асинхронно
+        //      выполнялся await LoadAllData() (в обработчике btnEditTask.Click),
+        //      а также мог сработать DataRefreshBus из-за SignalR-эха —
+        //      внутреннее состояние state.Version при этом не пересчитывалось,
+        //      из-за чего сервер при PUT /assignments/{id} возвращал
+        //      VersionConflict («задание было изменено другим пользователем»),
+        //      хотя реально его никто не менял.
+        //   2) Из-за повторного открытия окна в новом контексте часть
+        //      изменений визуально «терялась» — пользователь думал, что
+        //      «ничего не сохранилось».
+        //
+        // Новая модель: TM-builder теперь принимает callback onReturn(bool saved).
+        // Окно редактирования задания НЕ закрывается, а скрывается (Hide).
+        // При возврате из TM-builder caller сам решает, что делать дальше:
+        // обновить индикатор МТ и заново показать тот же taskForm — без
+        // пересоздания, без гонки с LoadAllData, без рассинхрона state.Version.
         // ──────────────────────────────────────────────────────────
-        private void EnterTeacherTMBuilderMode(int courseId, string courseName, TaskEditorState state, Form parentManageForm)
+        private void EnterTeacherTMBuilderMode(
+            TaskEditorState state,
+            Action<bool> onReturn)
         {
             BackupMainInterpreterState();
-            if (parentManageForm != null) parentManageForm.Hide();
+            // Видимость окна редактирования и «Мои курсы» контролирует caller
+            // (ShowTaskEditorWindow): до вызова этого метода они уже скрыты,
+            // после вызова onReturn — будут показаны обратно.
             if (btnUserMenu != null) btnUserMenu.Visible = false;
             this.Text = $"Конструктор МТ — {state.Title}";
 
@@ -140,9 +167,21 @@ namespace Интерпретатор_машины_Тьюринга
             if (commentTextBox != null) { commentTextBox.Enabled = false; commentTextBox.ReadOnly = true; commentTextBox.BackColor = System.Drawing.SystemColors.Window; commentTextBox.Text = ""; }
             UnlockInterpreter();
 
-            btnReturnTMTop.Click += (s, e) => { ExitTeacherTMBuilderMode(parentManageForm); ShowTaskEditorWindow(courseId, courseName, state, parentManageForm); };
+            // Защита от двойного срабатывания обработчиков (например, повторный клик
+            // во время асинхронной обработки): однократный флаг.
+            bool exited = false;
+
+            btnReturnTMTop.Click += (s, e) =>
+            {
+                if (exited) return;
+                exited = true;
+                ExitTeacherTMBuilderMode();
+                try { onReturn?.Invoke(false); } catch { }
+            };
             btnSaveTMTop.Click += (s, e) =>
             {
+                if (exited) return;
+                exited = true;
                 var problemTextBox2 = UslovieZadachi.Controls.OfType<TextBox>().FirstOrDefault();
                 var currentData = new TuringMachineData
                 {
@@ -155,13 +194,13 @@ namespace Интерпретатор_машины_Тьюринга
                     Comment = ""
                 };
                 state.ConfigurationJson = JsonConvert.SerializeObject(currentData);
-                ShowSuccessDialog("Конфигурация МТ успешно подготовлена. Для окончательного сохранения нажмите «Создать/Сохранить задание» в следующем окне.");
-                ExitTeacherTMBuilderMode(parentManageForm);
-                ShowTaskEditorWindow(courseId, courseName, state, parentManageForm);
+                ShowSuccessDialog("Конфигурация МТ успешно подготовлена. Для окончательного сохранения нажмите «Сохранить изменения» в окне редактирования задания.");
+                ExitTeacherTMBuilderMode();
+                try { onReturn?.Invoke(true); } catch { }
             };
         }
 
-        private void ExitTeacherTMBuilderMode(Form parentManageForm)
+        private void ExitTeacherTMBuilderMode()
         {
             if (btnSaveTMTop != null) { this.Controls.Remove(btnSaveTMTop); btnSaveTMTop.Dispose(); btnSaveTMTop = null; }
             if (btnReturnTMTop != null) { this.Controls.Remove(btnReturnTMTop); btnReturnTMTop.Dispose(); btnReturnTMTop = null; }
@@ -169,7 +208,8 @@ namespace Интерпретатор_машины_Тьюринга
             if (commentTextBox != null) { commentTextBox.Enabled = true; commentTextBox.ReadOnly = false; commentTextBox.Text = ""; }
             this.Text = "Интерпретатор машины Тьюринга";
             RestoreMainInterpreterState();
-            if (parentManageForm != null) { parentManageForm.Show(); parentManageForm.BringToFront(); }
+            // Показ parentManageForm/taskForm выполняет вызывающий код — caller
+            // знает в каком порядке восстанавливать видимость окон.
         }
 
         // ──────────────────────────────────────────────────────────
